@@ -1,5 +1,5 @@
-import { mkdirSync, writeFileSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdirSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
+import { join, resolve, extname } from "node:path";
 import { validateAbility } from "../validation/validator.js";
 import { registerAbility } from "../config/store.js";
 import { success, error, warn, info, p, handleCancel } from "../ui/format.js";
@@ -216,7 +216,25 @@ export async function initCommand(nameArg?: string): Promise<void> {
     .map((h) => h.trim())
     .filter(Boolean);
 
-  // Step 6: Confirm
+  // Step 6: Icon image
+  const iconInput = await p.text({
+    message: "Path to icon image (PNG or JPG for marketplace)",
+    placeholder: "./icon.png",
+    validate: (val) => {
+      if (!val || !val.trim()) return "An icon image is required";
+      const resolved = resolve(val.trim());
+      if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
+      const ext = extname(resolved).toLowerCase();
+      if (![".png", ".jpg", ".jpeg"].includes(ext))
+        return "Image must be PNG or JPG";
+    },
+  });
+  handleCancel(iconInput);
+  const iconSourcePath = resolve((iconInput as string).trim());
+  const iconExt = extname(iconSourcePath).toLowerCase();
+  const iconFileName = iconExt === ".jpeg" ? "icon.jpg" : `icon${iconExt}`;
+
+  // Step 7: Confirm
   const targetDir = resolve(name);
 
   if (existsSync(targetDir)) {
@@ -265,6 +283,9 @@ export async function initCommand(nameArg?: string): Promise<void> {
     writeFileSync(join(targetDir, file), content, "utf8");
   }
 
+  // Copy icon into ability directory
+  copyFileSync(iconSourcePath, join(targetDir, iconFileName));
+
   s.stop("Files generated.");
 
   // Track ability in config for deploy picker
@@ -283,10 +304,7 @@ export async function initCommand(nameArg?: string): Promise<void> {
     warn(`${w.file ? `[${w.file}] ` : ""}${w.message}`);
   }
 
-  p.note(
-    `cd ${name}\n# Add an icon.png for the marketplace\nopenhome deploy`,
-    "Next steps",
-  );
+  p.note(`cd ${name}\nopenhome deploy`, "Next steps");
 
   p.outro(`Ability "${name}" is ready! 🎉`);
 }

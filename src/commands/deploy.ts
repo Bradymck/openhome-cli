@@ -5,7 +5,7 @@ import { validateAbility } from "../validation/validator.js";
 import { createAbilityZip } from "../util/zip.js";
 import { ApiClient, NotImplementedError } from "../api/client.js";
 import { MockApiClient } from "../api/mock-client.js";
-import { getApiKey, getConfig } from "../config/store.js";
+import { getApiKey, getConfig, getTrackedAbilities } from "../config/store.js";
 import type {
   AbilityCategory,
   UploadAbilityMetadata,
@@ -36,12 +36,81 @@ function findIcon(dir: string): string | null {
   return null;
 }
 
+/** Resolve ability dir: use arg, pick from tracked, detect cwd, or prompt. */
+async function resolveAbilityDir(pathArg?: string): Promise<string> {
+  // Explicit path provided (CLI arg)
+  if (pathArg && pathArg !== ".") {
+    return resolve(pathArg);
+  }
+
+  const tracked = getTrackedAbilities();
+  const cwd = process.cwd();
+  const cwdIsAbility = existsSync(resolve(cwd, "config.json"));
+
+  // If we're inside an ability dir, just use it
+  if (cwdIsAbility) {
+    info(`Detected ability in current directory`);
+    return cwd;
+  }
+
+  // Build picker options from tracked abilities
+  const options: { value: string; label: string; hint?: string }[] = [];
+
+  for (const a of tracked) {
+    const home = homedir();
+    options.push({
+      value: a.path,
+      label: a.name,
+      hint: a.path.startsWith(home) ? `~${a.path.slice(home.length)}` : a.path,
+    });
+  }
+
+  // One tracked ability → auto-select
+  if (options.length === 1) {
+    info(`Using ability: ${options[0].label} (${options[0].hint})`);
+    return options[0].value;
+  }
+
+  // Multiple → show picker
+  if (options.length > 0) {
+    options.push({
+      value: "__custom__",
+      label: "Other...",
+      hint: "Enter a path manually",
+    });
+
+    const selected = await p.select({
+      message: "Which ability do you want to deploy?",
+      options,
+    });
+    handleCancel(selected);
+
+    if (selected !== "__custom__") {
+      return selected as string;
+    }
+  }
+
+  // Fallback: manual path entry
+  const pathInput = await p.text({
+    message: "Path to ability directory",
+    placeholder: "./my-ability",
+    validate: (val) => {
+      if (!val || !val.trim()) return "Path is required";
+      if (!existsSync(resolve(val.trim(), "config.json"))) {
+        return `No config.json found in "${val.trim()}"`;
+      }
+    },
+  });
+  handleCancel(pathInput);
+  return resolve((pathInput as string).trim());
+}
+
 export async function deployCommand(
-  pathArg: string = ".",
+  pathArg?: string,
   opts: { dryRun?: boolean; mock?: boolean; personality?: string } = {},
 ): Promise<void> {
-  const targetDir = resolve(pathArg);
   p.intro("🚀 Deploy ability");
+  const targetDir = await resolveAbilityDir(pathArg);
 
   // Step 1: Validate
   const s = p.spinner();

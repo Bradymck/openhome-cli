@@ -1,0 +1,6 @@
+{
+  "unique_name": "coolability",
+  "description": "a fun ability",
+  "category": "skill",
+  "matching_hotwords": ["ability"]
+}

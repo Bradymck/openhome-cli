@@ -1,11 +1,7 @@
 import { Command } from "commander";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { homedir } from "node:os";
 import { readFileSync } from "node:fs";
-
-import { existsSync } from "node:fs";
-import { resolve, basename } from "node:path";
 
 import { loginCommand } from "./commands/login.js";
 import { initCommand } from "./commands/init.js";
@@ -15,7 +11,7 @@ import { statusCommand } from "./commands/status.js";
 import { agentsCommand } from "./commands/agents.js";
 import { logoutCommand } from "./commands/logout.js";
 import { chatCommand } from "./commands/chat.js";
-import { p, handleCancel, info } from "./ui/format.js";
+import { p, handleCancel } from "./ui/format.js";
 
 // Read version from package.json
 const __filename = fileURLToPath(import.meta.url);
@@ -31,79 +27,6 @@ try {
 }
 
 // ── Interactive menu (bare `openhome` with no args) ──────────────
-
-/** Check if a directory looks like an ability (has config.json). */
-function detectAbility(dir: string): boolean {
-  return existsSync(resolve(dir, "config.json"));
-}
-
-/** Resolve the ability directory — pick from tracked abilities, detect cwd, or prompt. */
-async function resolveAbilityDir(): Promise<string> {
-  const { getTrackedAbilities } = await import("./config/store.js");
-  const tracked = getTrackedAbilities();
-  const cwd = process.cwd();
-  const cwdIsAbility = detectAbility(cwd);
-
-  // Build options from tracked abilities + cwd if it's an ability not already tracked
-  const options: { value: string; label: string; hint?: string }[] = [];
-
-  for (const a of tracked) {
-    options.push({
-      value: a.path,
-      label: a.name,
-      hint: a.path.startsWith(homedir())
-        ? `~${a.path.slice(homedir().length)}`
-        : a.path,
-    });
-  }
-
-  if (cwdIsAbility && !tracked.some((a) => a.path === cwd)) {
-    options.push({
-      value: cwd,
-      label: basename(cwd),
-      hint: "(current directory)",
-    });
-  }
-
-  // If we have exactly one option, auto-select it
-  if (options.length === 1) {
-    info(`Using ability: ${options[0].label} (${options[0].hint})`);
-    return options[0].value;
-  }
-
-  // If we have multiple options, let user pick
-  if (options.length > 0) {
-    options.push({
-      value: "__custom__",
-      label: "Other...",
-      hint: "Enter a path manually",
-    });
-
-    const selected = await p.select({
-      message: "Which ability do you want to deploy?",
-      options,
-    });
-    handleCancel(selected);
-
-    if (selected !== "__custom__") {
-      return selected as string;
-    }
-  }
-
-  // Fallback: manual path entry
-  const path = await p.text({
-    message: "Path to ability directory",
-    placeholder: "./my-ability",
-    validate: (val) => {
-      if (!val || !val.trim()) return "Path is required";
-      if (!existsSync(resolve(val.trim(), "config.json"))) {
-        return `No config.json found in "${val.trim()}"`;
-      }
-    },
-  });
-  handleCancel(path);
-  return resolve((path as string).trim());
-}
 
 async function ensureLoggedIn(): Promise<void> {
   const { getApiKey } = await import("./config/store.js");
@@ -173,11 +96,9 @@ async function interactiveMenu(): Promise<void> {
       case "init":
         await initCommand();
         break;
-      case "deploy": {
-        const dir = await resolveAbilityDir();
-        await deployCommand(dir);
+      case "deploy":
+        await deployCommand();
         break;
-      }
       case "chat":
         await chatCommand();
         break;
@@ -244,7 +165,7 @@ program
       path: string | undefined,
       opts: { dryRun?: boolean; mock?: boolean; personality?: string },
     ) => {
-      await deployCommand(path ?? ".", opts);
+      await deployCommand(path, opts);
     },
   );
 
