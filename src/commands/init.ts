@@ -144,7 +144,30 @@ export async function initCommand(nameArg?: string): Promise<void> {
     name = (nameInput as string).trim();
   }
 
-  // Step 2: Template
+  // Step 2: Ability category
+  const category = await p.select({
+    message: "What type of ability?",
+    options: [
+      {
+        value: "skill",
+        label: "Skill",
+        hint: "User-triggered, runs on demand (most common)",
+      },
+      {
+        value: "brain",
+        label: "Brain Skill",
+        hint: "Auto-triggered by the agent's intelligence",
+      },
+      {
+        value: "daemon",
+        label: "Background Daemon",
+        hint: "Runs continuously from session start",
+      },
+    ],
+  });
+  handleCancel(category);
+
+  // Step 3: Template
   const templateType = await p.select({
     message: "Choose a template",
     options: [

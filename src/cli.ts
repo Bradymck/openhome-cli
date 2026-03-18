@@ -9,6 +9,7 @@ import { validateCommand } from "./commands/validate.js";
 import { deployCommand } from "./commands/deploy.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
+import { p, handleCancel } from "./ui/format.js";
 
 // Read version from package.json
 const __filename = fileURLToPath(import.meta.url);
@@ -22,6 +23,101 @@ try {
 } catch {
   // fallback to default
 }
+
+// ── Interactive menu (bare `openhome` with no args) ──────────────
+
+async function interactiveMenu(): Promise<void> {
+  p.intro(`🏠 OpenHome CLI v${version}`);
+
+  let running = true;
+  while (running) {
+    const choice = await p.select({
+      message: "What would you like to do?",
+      options: [
+        {
+          value: "login",
+          label: "🔑  Login",
+          hint: "Authenticate with your API key",
+        },
+        {
+          value: "init",
+          label: "✨  Create Ability",
+          hint: "Scaffold a new ability",
+        },
+        {
+          value: "validate",
+          label: "🔎  Validate",
+          hint: "Check ability structure",
+        },
+        {
+          value: "deploy",
+          label: "🚀  Deploy",
+          hint: "Upload ability to OpenHome",
+        },
+        {
+          value: "list",
+          label: "📋  My Abilities",
+          hint: "List deployed abilities",
+        },
+        { value: "status", label: "🔍  Status", hint: "Check ability status" },
+        { value: "exit", label: "👋  Exit", hint: "Quit" },
+      ],
+    });
+    handleCancel(choice);
+
+    switch (choice) {
+      case "login":
+        await loginCommand();
+        break;
+      case "init":
+        await initCommand();
+        break;
+      case "validate": {
+        const path = await p.text({
+          message: "Path to ability directory",
+          placeholder: ".",
+          defaultValue: ".",
+        });
+        handleCancel(path);
+        await validateCommand(path as string);
+        break;
+      }
+      case "deploy": {
+        const path = await p.text({
+          message: "Path to ability directory",
+          placeholder: ".",
+          defaultValue: ".",
+        });
+        handleCancel(path);
+        await deployCommand(path as string);
+        break;
+      }
+      case "list":
+        await listCommand();
+        break;
+      case "status": {
+        const ability = await p.text({
+          message: "Ability name (leave empty to read from config.json)",
+          placeholder: "my-ability",
+        });
+        handleCancel(ability);
+        await statusCommand((ability as string) || undefined);
+        break;
+      }
+      case "exit":
+        running = false;
+        break;
+    }
+
+    if (running) {
+      console.log(""); // spacing between commands
+    }
+  }
+
+  p.outro("See you next time!");
+}
+
+// ── Commander subcommands (direct usage) ─────────────────────────
 
 const program = new Command();
 
@@ -56,7 +152,7 @@ program
   .description("Validate and deploy an ability to OpenHome")
   .option("--dry-run", "Show what would be deployed without sending")
   .option("--mock", "Use mock API client (no real network calls)")
-  .option("--personality <id>", "Personality ID to attach the ability to")
+  .option("--personality <id>", "Agent ID to attach the ability to")
   .action(
     async (
       path: string | undefined,
@@ -84,7 +180,16 @@ program
     await statusCommand(ability, opts);
   });
 
-program.parseAsync(process.argv).catch((err: unknown) => {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
+// ── Entry point: menu if no args, subcommand otherwise ───────────
+
+if (process.argv.length <= 2) {
+  interactiveMenu().catch((err: unknown) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
+} else {
+  program.parseAsync(process.argv).catch((err: unknown) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
+}

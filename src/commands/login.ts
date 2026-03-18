@@ -30,18 +30,18 @@ export async function loginCommand(): Promise<void> {
   saveApiKey(apiKey as string);
 
   if (personalities.length === 0) {
-    info("No personalities found. Create one at https://app.openhome.com");
+    info("No agents found. Create one at https://app.openhome.com");
     p.outro("Login complete.");
     return;
   }
 
   p.note(
     personalities.map((pers) => `${pers.name} (${pers.id})`).join("\n"),
-    `Found ${personalities.length} personality(s)`,
+    `Found ${personalities.length} agent(s)`,
   );
 
   const defaultPersonality = await p.select({
-    message: "Set your default personality",
+    message: "Set your default agent",
     options: [
       ...personalities.map((pers) => ({
         value: pers.id,
@@ -57,7 +57,7 @@ export async function loginCommand(): Promise<void> {
     const config = getConfig();
     config.default_personality_id = defaultPersonality as string;
     saveConfig(config);
-    success(`Default personality: ${defaultPersonality}`);
+    success(`Default agent: ${String(defaultPersonality)}`);
   }
 
   p.outro("You're ready to deploy abilities! 🚀");
