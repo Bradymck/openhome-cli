@@ -26,7 +26,16 @@ export async function createAbilityZip(dirPath: string): Promise<Buffer> {
 
     archive.glob("**/*", {
       cwd: dirPath,
-      ignore: ["**/__pycache__/**", "**/*.pyc", "**/.git/**"],
+      ignore: [
+        "**/__pycache__/**",
+        "**/*.pyc",
+        "**/.git/**",
+        "**/.env",
+        "**/.env.*",
+        "**/secrets.*",
+        "**/*.key",
+        "**/*.pem",
+      ],
     });
 
     archive.finalize().catch(reject);
@@ -48,7 +57,16 @@ export async function writeAbilityZip(
 
     archive.glob("**/*", {
       cwd: dirPath,
-      ignore: ["**/__pycache__/**", "**/*.pyc", "**/.git/**"],
+      ignore: [
+        "**/__pycache__/**",
+        "**/*.pyc",
+        "**/.git/**",
+        "**/.env",
+        "**/.env.*",
+        "**/secrets.*",
+        "**/*.key",
+        "**/*.pem",
+      ],
     });
 
     archive.finalize().catch(reject);

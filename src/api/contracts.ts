@@ -15,6 +15,17 @@ export interface GetPersonalitiesResponse {
   personalities: Personality[];
 }
 
+// Upload request metadata
+export type AbilityCategory = "skill" | "brain" | "daemon";
+
+export interface UploadAbilityMetadata {
+  name: string;
+  description: string;
+  category: AbilityCategory;
+  matching_hotwords: string[];
+  personality_id?: string;
+}
+
 // Proposed endpoints (not yet implemented on server)
 
 export interface UploadAbilityResponse {

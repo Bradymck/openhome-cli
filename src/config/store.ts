@@ -14,7 +14,7 @@ const CONFIG_FILE = join(CONFIG_DIR, "config.json");
 
 function ensureConfigDir(): void {
   if (!existsSync(CONFIG_DIR)) {
-    mkdirSync(CONFIG_DIR, { recursive: true });
+    mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 });
   }
 }
 
@@ -33,7 +33,10 @@ export function getConfig(): CliConfig {
 
 export function saveConfig(config: CliConfig): void {
   ensureConfigDir();
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), "utf8");
+  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
 }
 
 export function getApiKey(): string | null {

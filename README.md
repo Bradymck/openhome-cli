@@ -1,6 +1,6 @@
 # OpenHome CLI
 
-Command-line tool for managing OpenHome voice AI abilities. Create, validate, and deploy abilities without leaving your terminal.
+Command-line tool for managing OpenHome voice AI abilities. Create and deploy abilities without leaving your terminal.
 
 **Status:** v0.1.0 (MVP)
 **Node:** 18+
@@ -35,10 +35,7 @@ openhome init my-ability
 
 # 3. Edit main.py in your editor
 
-# 4. Check your work
-openhome validate ./my-ability
-
-# 5. Deploy
+# 4. Deploy
 openhome deploy ./my-ability
 ```
 
@@ -56,15 +53,17 @@ Opens an interactive menu. Use arrow keys to navigate, Enter to select. The menu
 ┌  OpenHome CLI v0.1.0
 │
 ◆  What would you like to do?
-│  ● Login
+│  ● Log Out
 │  ○ Create Ability
-│  ○ Validate
 │  ○ Deploy
 │  ○ My Abilities
+│  ○ My Agents
 │  ○ Status
 │  ○ Exit
 └
 ```
+
+If you are not logged in, the CLI prompts for login before showing the menu.
 
 All commands below also work directly from the terminal.
 
@@ -77,7 +76,6 @@ Authenticate with your OpenHome API key.
 1. Prompts for your API key (masked input)
 2. Verifies the key against the OpenHome API
 3. Stores the key securely (macOS Keychain, or `~/.openhome/config.json` fallback)
-4. Lists your agents and lets you set a default
 
 ```bash
 openhome login
@@ -116,19 +114,15 @@ The generated code auto-validates after creation.
 
 ---
 
-### `openhome validate [path]`
+### `openhome logout`
 
-Check an ability directory for errors before deploying.
+Clear stored credentials and log out.
 
 ```bash
-# Current directory
-openhome validate
-
-# Specific path
-openhome validate ./my-ability
+openhome logout
 ```
 
-Checks for required files, Python patterns, blocked imports, and config structure. See [Validation Rules](#validation-rules) below.
+Removes the API key from macOS Keychain and clears the default agent from config. In the interactive menu, selecting Log Out immediately prompts you to log in again.
 
 ---
 
@@ -188,6 +182,21 @@ Status colors: green = active, yellow = processing, red = failed, gray = disable
 
 ---
 
+### `openhome agents`
+
+View your agents and set a default for deploys.
+
+```bash
+openhome agents
+
+# Test with fake data
+openhome agents --mock
+```
+
+Shows all agents on your account with names and descriptions. Optionally set or change your default agent (used by `deploy` when `--personality` is not specified).
+
+---
+
 ### `openhome status [ability]`
 
 Show detailed info for one ability.
@@ -211,7 +220,7 @@ Shows: name, display name, status, version, timestamps, linked agents, validatio
 
 ## Validation Rules
 
-The `validate` command checks these rules. Errors block deployment. Warnings do not.
+Deploy automatically checks these rules before uploading. Errors block deployment. Warnings do not.
 
 ### Required Files
 
@@ -306,11 +315,12 @@ openhome-cli/
 ├── src/
 │   ├── cli.ts                # Menu + Commander setup
 │   ├── commands/
-│   │   ├── login.ts          # API key auth + agent selection
+│   │   ├── login.ts          # API key auth
+│   │   ├── logout.ts         # Clear credentials
 │   │   ├── init.ts           # Scaffold new ability
-│   │   ├── validate.ts       # Run validation checks
 │   │   ├── deploy.ts         # Validate + zip + upload
 │   │   ├── list.ts           # List abilities table
+│   │   ├── agents.ts         # View agents + set default
 │   │   └── status.ts         # Ability detail view
 │   ├── api/
 │   │   ├── client.ts         # HTTP client + error handling
@@ -386,7 +396,7 @@ Use `--mock` on any command to test with fake data while endpoints are being bui
 
 ## What This Tool Does NOT Do
 
-- **No local ability testing** — There is no local mock of the OpenHome runtime (`CapabilityWorker`, `AgentWorker`). You must deploy to test.
+- **No local ability testing** — Abilities run on the OpenHome platform. Deploy and use "Start Live Test" in the web editor to test.
 - **No log streaming** — `openhome logs` is not yet implemented.
 - **No ability deletion** — Must be done through the web dashboard.
 - **No ability editing** — The CLI does not modify deployed abilities. Edit locally, then re-deploy.
@@ -402,7 +412,6 @@ Use `--mock` on any command to test with fake data while endpoints are being bui
 - [ ] `openhome logs [ability]` — Stream ability logs in real-time
 - [ ] `openhome delete [ability]` — Remove a deployed ability
 - [ ] `openhome update` — Re-deploy an existing ability (shortcut for deploy)
-- [ ] Local testing framework with mock `CapabilityWorker`
 - [ ] `openhome watch` — Auto-deploy on file changes
 - [ ] Background Daemon and Brain Skill templates
 - [ ] Cross-platform secure key storage (Windows Credential Manager, Linux Secret Service)

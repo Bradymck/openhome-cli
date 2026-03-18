@@ -49,6 +49,8 @@ A custom OpenHome ability.
 `,
       "config.json": `{
   "unique_name": "{{UNIQUE_NAME}}",
+  "description": "{{DESCRIPTION}}",
+  "category": "{{CATEGORY}}",
   "matching_hotwords": {{HOTWORDS}}
 }
 `,
@@ -100,6 +102,8 @@ This ability requires an \`api_key\` secret configured in your OpenHome personal
 `,
       "config.json": `{
   "unique_name": "{{UNIQUE_NAME}}",
+  "description": "{{DESCRIPTION}}",
+  "category": "{{CATEGORY}}",
   "matching_hotwords": {{HOTWORDS}}
 }
 `,
@@ -167,7 +171,18 @@ export async function initCommand(nameArg?: string): Promise<void> {
   });
   handleCancel(category);
 
-  // Step 3: Template
+  // Step 3: Description
+  const descInput = await p.text({
+    message: "Short description for the marketplace",
+    placeholder: "A fun ability that checks the weather",
+    validate: (val) => {
+      if (!val || !val.trim()) return "Description is required";
+    },
+  });
+  handleCancel(descInput);
+  const description = (descInput as string).trim();
+
+  // Step 4: Template
   const templateType = await p.select({
     message: "Choose a template",
     options: [
@@ -185,7 +200,7 @@ export async function initCommand(nameArg?: string): Promise<void> {
   });
   handleCancel(templateType);
 
-  // Step 3: Hotwords
+  // Step 5: Hotwords
   const hotwordInput = await p.text({
     message: "Trigger words (comma-separated)",
     placeholder: "check weather, weather please",
@@ -200,7 +215,7 @@ export async function initCommand(nameArg?: string): Promise<void> {
     .map((h) => h.trim())
     .filter(Boolean);
 
-  // Step 4: Confirm
+  // Step 6: Confirm
   const targetDir = resolve(name);
 
   if (existsSync(targetDir)) {
@@ -218,7 +233,7 @@ export async function initCommand(nameArg?: string): Promise<void> {
     process.exit(0);
   }
 
-  // Step 5: Generate files
+  // Step 7: Generate files
   const s = p.spinner();
   s.start("Generating ability files...");
 
@@ -234,6 +249,8 @@ export async function initCommand(nameArg?: string): Promise<void> {
     CLASS_NAME: className,
     UNIQUE_NAME: name,
     DISPLAY_NAME: displayName,
+    DESCRIPTION: description,
+    CATEGORY: category as string,
     HOTWORDS: JSON.stringify(hotwords),
     HOTWORD_LIST: hotwords.map((h) => `- "${h}"`).join("\n"),
   };
@@ -262,7 +279,10 @@ export async function initCommand(nameArg?: string): Promise<void> {
     warn(`${w.file ? `[${w.file}] ` : ""}${w.message}`);
   }
 
-  p.note(`cd ${name}\nopenhome validate\nopenhome deploy`, "Next steps");
+  p.note(
+    `cd ${name}\n# Add an icon.png for the marketplace\nopenhome deploy`,
+    "Next steps",
+  );
 
   p.outro(`Ability "${name}" is ready! 🎉`);
 }

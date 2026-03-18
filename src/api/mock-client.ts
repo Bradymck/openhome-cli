@@ -1,6 +1,7 @@
 import type {
   Personality,
   UploadAbilityResponse,
+  UploadAbilityMetadata,
   ListAbilitiesResponse,
   GetAbilityResponse,
 } from "./contracts.js";
@@ -52,7 +53,9 @@ export class MockApiClient implements IApiClient {
 
   async uploadAbility(
     _zipBuffer: Buffer,
-    _personalityId?: string,
+    _imageBuffer: Buffer,
+    _imageName: string,
+    _metadata: UploadAbilityMetadata,
   ): Promise<UploadAbilityResponse> {
     return Promise.resolve({
       ability_id: `abl_mock_${Date.now()}`,

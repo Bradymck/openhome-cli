@@ -1,16 +1,39 @@
-import { resolve, join } from "node:path";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { resolve, join, basename } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { validateAbility } from "../validation/validator.js";
 import { createAbilityZip } from "../util/zip.js";
 import { ApiClient, NotImplementedError } from "../api/client.js";
 import { MockApiClient } from "../api/mock-client.js";
 import { getApiKey, getConfig } from "../config/store.js";
-import { error, warn, p, handleCancel } from "../ui/format.js";
+import type {
+  AbilityCategory,
+  UploadAbilityMetadata,
+} from "../api/contracts.js";
+import { error, warn, info, p, handleCancel } from "../ui/format.js";
 
 interface AbilityConfig {
   unique_name: string;
+  description?: string;
+  category?: string;
+  matching_hotwords?: string[];
   [key: string]: unknown;
+}
+
+const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg"];
+const ICON_NAMES = IMAGE_EXTENSIONS.flatMap((ext) => [
+  `icon.${ext}`,
+  `image.${ext}`,
+  `logo.${ext}`,
+]);
+
+/** Find an icon image in the ability directory, or return null. */
+function findIcon(dir: string): string | null {
+  for (const name of ICON_NAMES) {
+    const p = join(dir, name);
+    if (existsSync(p)) return p;
+  }
+  return null;
 }
 
 export async function deployCommand(
@@ -53,14 +76,87 @@ export async function deployCommand(
   }
 
   const uniqueName = abilityConfig.unique_name;
+  const hotwords = abilityConfig.matching_hotwords ?? [];
 
-  // Step 3: Dry run
+  // Step 3: Resolve description (from config or prompt)
+  let description = abilityConfig.description?.trim();
+  if (!description) {
+    const descInput = await p.text({
+      message: "Ability description (required for marketplace)",
+      placeholder: "A fun ability that does something cool",
+      validate: (val) => {
+        if (!val || !val.trim()) return "Description is required";
+      },
+    });
+    handleCancel(descInput);
+    description = (descInput as string).trim();
+  }
+
+  // Step 4: Resolve category (from config or prompt)
+  let category = abilityConfig.category as AbilityCategory | undefined;
+  if (!category || !["skill", "brain", "daemon"].includes(category)) {
+    const catChoice = await p.select({
+      message: "Ability category",
+      options: [
+        { value: "skill", label: "Skill", hint: "User-triggered" },
+        { value: "brain", label: "Brain Skill", hint: "Auto-triggered" },
+        {
+          value: "daemon",
+          label: "Background Daemon",
+          hint: "Runs continuously",
+        },
+      ],
+    });
+    handleCancel(catChoice);
+    category = catChoice as AbilityCategory;
+  }
+
+  // Step 5: Resolve image (auto-detect or prompt)
+  let imagePath = findIcon(targetDir);
+  if (imagePath) {
+    info(`Found icon: ${basename(imagePath)}`);
+  } else {
+    const imgInput = await p.text({
+      message: "Path to ability icon image (PNG or JPG, required)",
+      placeholder: "./icon.png",
+      validate: (val) => {
+        if (!val || !val.trim())
+          return "An icon image is required for deployment";
+        const resolved = resolve(val.trim());
+        if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
+        const ext = resolved.split(".").pop()?.toLowerCase();
+        if (!ext || !IMAGE_EXTENSIONS.includes(ext))
+          return "Image must be PNG or JPG";
+      },
+    });
+    handleCancel(imgInput);
+    imagePath = resolve((imgInput as string).trim());
+  }
+
+  const imageBuffer = readFileSync(imagePath);
+  const imageName = basename(imagePath);
+
+  const personalityId = opts.personality ?? getConfig().default_personality_id;
+
+  const metadata: UploadAbilityMetadata = {
+    name: uniqueName,
+    description,
+    category,
+    matching_hotwords: hotwords,
+    personality_id: personalityId,
+  };
+
+  // Step 6: Dry run
   if (opts.dryRun) {
     p.note(
       [
         `Directory:   ${targetDir}`,
-        `Unique name: ${uniqueName}`,
-        `Personality: ${opts.personality ?? getConfig().default_personality_id ?? "(none set)"}`,
+        `Name:        ${uniqueName}`,
+        `Description: ${description}`,
+        `Category:    ${category}`,
+        `Image:       ${imageName}`,
+        `Hotwords:    ${hotwords.join(", ")}`,
+        `Agent:       ${personalityId ?? "(none set)"}`,
       ].join("\n"),
       "Dry Run — would deploy",
     );
@@ -68,7 +164,7 @@ export async function deployCommand(
     return;
   }
 
-  // Step 4: Create zip
+  // Step 7: Create zip
   s.start("Creating ability zip...");
   let zipBuffer: Buffer;
   try {
@@ -80,13 +176,16 @@ export async function deployCommand(
     process.exit(1);
   }
 
-  // Step 5: Deploy
-  const personalityId = opts.personality ?? getConfig().default_personality_id;
-
+  // Step 8: Deploy
   if (opts.mock) {
     s.start("Uploading ability (mock)...");
     const mockClient = new MockApiClient();
-    const result = await mockClient.uploadAbility(zipBuffer, personalityId);
+    const result = await mockClient.uploadAbility(
+      zipBuffer,
+      imageBuffer,
+      imageName,
+      metadata,
+    );
     s.stop("Upload complete.");
 
     p.note(
@@ -121,7 +220,12 @@ export async function deployCommand(
   s.start("Uploading ability...");
   try {
     const client = new ApiClient(apiKey, getConfig().api_base_url);
-    const result = await client.uploadAbility(zipBuffer, personalityId);
+    const result = await client.uploadAbility(
+      zipBuffer,
+      imageBuffer,
+      imageName,
+      metadata,
+    );
     s.stop("Upload complete.");
 
     p.note(

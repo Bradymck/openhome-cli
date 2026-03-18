@@ -3,13 +3,17 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
 import { loginCommand } from "./commands/login.js";
 import { initCommand } from "./commands/init.js";
-import { validateCommand } from "./commands/validate.js";
 import { deployCommand } from "./commands/deploy.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
-import { p, handleCancel } from "./ui/format.js";
+import { agentsCommand } from "./commands/agents.js";
+import { logoutCommand } from "./commands/logout.js";
+import { p, handleCancel, info } from "./ui/format.js";
 
 // Read version from package.json
 const __filename = fileURLToPath(import.meta.url);
@@ -26,8 +30,48 @@ try {
 
 // ── Interactive menu (bare `openhome` with no args) ──────────────
 
+/** Check if a directory looks like an ability (has config.json). */
+function detectAbility(dir: string): boolean {
+  return existsSync(resolve(dir, "config.json"));
+}
+
+/** Resolve the ability directory — auto-detect current dir or prompt. */
+async function resolveAbilityDir(): Promise<string> {
+  const cwd = process.cwd();
+  if (detectAbility(cwd)) {
+    info(`Detected ability in current directory: ${cwd}`);
+    return cwd;
+  }
+
+  // Not in an ability dir — ask for path
+  const path = await p.text({
+    message: "Path to ability directory",
+    placeholder: "./my-ability",
+    validate: (val) => {
+      if (!val || !val.trim()) return "Path is required";
+      if (!existsSync(resolve(val.trim(), "config.json"))) {
+        return `No config.json found in "${val.trim()}"`;
+      }
+    },
+  });
+  handleCancel(path);
+  return (path as string).trim();
+}
+
+async function ensureLoggedIn(): Promise<void> {
+  const { getApiKey } = await import("./config/store.js");
+  const key = getApiKey();
+  if (!key) {
+    await loginCommand();
+    console.log("");
+  }
+}
+
 async function interactiveMenu(): Promise<void> {
   p.intro(`🏠 OpenHome CLI v${version}`);
+
+  // Login first if not authenticated
+  await ensureLoggedIn();
 
   let running = true;
   while (running) {
@@ -35,19 +79,14 @@ async function interactiveMenu(): Promise<void> {
       message: "What would you like to do?",
       options: [
         {
-          value: "login",
-          label: "🔑  Login",
-          hint: "Authenticate with your API key",
+          value: "logout",
+          label: "🔓  Log Out",
+          hint: "Clear credentials and re-authenticate",
         },
         {
           value: "init",
           label: "✨  Create Ability",
           hint: "Scaffold a new ability",
-        },
-        {
-          value: "validate",
-          label: "🔎  Validate",
-          hint: "Check ability structure",
         },
         {
           value: "deploy",
@@ -59,51 +98,43 @@ async function interactiveMenu(): Promise<void> {
           label: "📋  My Abilities",
           hint: "List deployed abilities",
         },
-        { value: "status", label: "🔍  Status", hint: "Check ability status" },
+        {
+          value: "agents",
+          label: "🤖  My Agents",
+          hint: "View agents and set default",
+        },
+        {
+          value: "status",
+          label: "🔍  Status",
+          hint: "Check ability status",
+        },
         { value: "exit", label: "👋  Exit", hint: "Quit" },
       ],
     });
     handleCancel(choice);
 
     switch (choice) {
-      case "login":
-        await loginCommand();
+      case "logout":
+        await logoutCommand();
+        await ensureLoggedIn();
         break;
       case "init":
         await initCommand();
         break;
-      case "validate": {
-        const path = await p.text({
-          message: "Path to ability directory",
-          placeholder: ".",
-          defaultValue: ".",
-        });
-        handleCancel(path);
-        await validateCommand(path as string);
-        break;
-      }
       case "deploy": {
-        const path = await p.text({
-          message: "Path to ability directory",
-          placeholder: ".",
-          defaultValue: ".",
-        });
-        handleCancel(path);
-        await deployCommand(path as string);
+        const dir = await resolveAbilityDir();
+        await deployCommand(dir);
         break;
       }
       case "list":
         await listCommand();
         break;
-      case "status": {
-        const ability = await p.text({
-          message: "Ability name (leave empty to read from config.json)",
-          placeholder: "my-ability",
-        });
-        handleCancel(ability);
-        await statusCommand((ability as string) || undefined);
+      case "agents":
+        await agentsCommand();
         break;
-      }
+      case "status":
+        await statusCommand();
+        break;
       case "exit":
         running = false;
         break;
@@ -134,17 +165,17 @@ program
   });
 
 program
+  .command("logout")
+  .description("Log out and clear stored credentials")
+  .action(async () => {
+    await logoutCommand();
+  });
+
+program
   .command("init [name]")
   .description("Scaffold a new ability in a new directory")
   .action(async (name?: string) => {
     await initCommand(name);
-  });
-
-program
-  .command("validate [path]")
-  .description("Validate an ability directory (default: current directory)")
-  .action(async (path?: string) => {
-    await validateCommand(path ?? ".");
   });
 
 program
@@ -168,6 +199,14 @@ program
   .option("--mock", "Use mock API client")
   .action(async (opts: { mock?: boolean }) => {
     await listCommand(opts);
+  });
+
+program
+  .command("agents")
+  .description("View your agents and set a default")
+  .option("--mock", "Use mock API client")
+  .action(async (opts: { mock?: boolean }) => {
+    await agentsCommand(opts);
   });
 
 program

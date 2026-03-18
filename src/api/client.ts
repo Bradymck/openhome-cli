@@ -2,6 +2,7 @@ import type {
   GetPersonalitiesResponse,
   Personality,
   UploadAbilityResponse,
+  UploadAbilityMetadata,
   ListAbilitiesResponse,
   GetAbilityResponse,
   ApiErrorResponse,
@@ -30,7 +31,9 @@ export interface IApiClient {
   getPersonalities(): Promise<Personality[]>;
   uploadAbility(
     zipBuffer: Buffer,
-    personalityId?: string,
+    imageBuffer: Buffer,
+    imageName: string,
+    metadata: UploadAbilityMetadata,
   ): Promise<UploadAbilityResponse>;
   listAbilities(): Promise<ListAbilitiesResponse>;
   getAbility(id: string): Promise<GetAbilityResponse>;
@@ -44,6 +47,9 @@ export class ApiClient implements IApiClient {
     baseUrl?: string,
   ) {
     this.baseUrl = baseUrl ?? API_BASE;
+    if (!this.baseUrl.startsWith("https://")) {
+      throw new Error("API base URL must use HTTPS. Got: " + this.baseUrl);
+    }
   }
 
   private async request<T>(
@@ -95,7 +101,9 @@ export class ApiClient implements IApiClient {
 
   async uploadAbility(
     zipBuffer: Buffer,
-    personalityId?: string,
+    imageBuffer: Buffer,
+    imageName: string,
+    metadata: UploadAbilityMetadata,
   ): Promise<UploadAbilityResponse> {
     const form = new FormData();
     form.append(
@@ -105,8 +113,25 @@ export class ApiClient implements IApiClient {
       }),
       "ability.zip",
     );
-    if (personalityId) {
-      form.append("personality_id", personalityId);
+
+    const imageExt = imageName.split(".").pop()?.toLowerCase() ?? "png";
+    const imageMime =
+      imageExt === "jpg" || imageExt === "jpeg" ? "image/jpeg" : "image/png";
+    form.append(
+      "image",
+      new Blob([imageBuffer as unknown as ArrayBuffer], { type: imageMime }),
+      imageName,
+    );
+
+    form.append("name", metadata.name);
+    form.append("description", metadata.description);
+    form.append("category", metadata.category);
+    form.append(
+      "matching_hotwords",
+      JSON.stringify(metadata.matching_hotwords),
+    );
+    if (metadata.personality_id) {
+      form.append("personality_id", metadata.personality_id);
     }
 
     return this.request<UploadAbilityResponse>(ENDPOINTS.abilities, {
