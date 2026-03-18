@@ -86,7 +86,7 @@ export async function deployCommand(
     info("[MOCK] Using mock client...");
     const mockClient = new MockApiClient();
     const result = await mockClient.uploadAbility(zipBuffer, personalityId);
-    success(`[MOCK] ${result.message}`);
+    success(result.message);
     info(`  Ability ID: ${result.ability_id}`);
     info(`  Status: ${result.status}`);
     return;
