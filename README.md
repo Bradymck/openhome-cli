@@ -56,6 +56,7 @@ Opens an interactive menu. Use arrow keys to navigate, Enter to select. The menu
 │  ● Log Out
 │  ○ Create Ability
 │  ○ Deploy
+│  ○ Chat
 │  ○ My Abilities
 │  ○ My Agents
 │  ○ Status
@@ -123,6 +124,26 @@ openhome logout
 ```
 
 Removes the API key from macOS Keychain and clears the default agent from config. In the interactive menu, selecting Log Out immediately prompts you to log in again.
+
+---
+
+### `openhome chat [agent]`
+
+Chat with an agent via WebSocket. Send text messages and trigger abilities with keywords.
+
+```bash
+# Pick an agent interactively
+openhome chat
+
+# Chat with a specific agent
+openhome chat pers_abc123
+```
+
+Once connected, type messages and press Enter. The agent responds in real-time. Send trigger words (e.g. "play aquaprime") to activate abilities remotely.
+
+Commands inside chat: `/quit`, `/exit`, or `/q` to disconnect. Ctrl+C also works.
+
+> **Note:** Audio responses from the agent are not playable in the terminal. Text responses display normally.
 
 ---
 
@@ -319,6 +340,7 @@ openhome-cli/
 │   │   ├── logout.ts         # Clear credentials
 │   │   ├── init.ts           # Scaffold new ability
 │   │   ├── deploy.ts         # Validate + zip + upload
+│   │   ├── chat.ts           # WebSocket chat with agent
 │   │   ├── list.ts           # List abilities table
 │   │   ├── agents.ts         # View agents + set default
 │   │   └── status.ts         # Ability detail view
@@ -370,6 +392,7 @@ npm run test
 | commander | 12.x | CLI argument parsing |
 | @clack/prompts | 1.x | Interactive menus, spinners, prompts |
 | chalk | 5.x | Terminal colors |
+| ws | 8.x | WebSocket client for agent chat |
 | archiver | 7.x | ZIP file creation |
 | typescript | 5.x | Type safety |
 | tsup | 8.x | Build tool |
@@ -382,6 +405,7 @@ npm run test
 | Endpoint | Method | Status |
 |----------|--------|--------|
 | `/api/sdk/get_personalities` | POST | Live |
+| `/websocket/voice-stream/{key}/{agent}` | WebSocket | Live |
 | `/api/sdk/abilities` | POST (upload) | Not yet implemented |
 | `/api/sdk/abilities` | GET (list) | Not yet implemented |
 | `/api/sdk/abilities/:id` | GET (detail) | Not yet implemented |

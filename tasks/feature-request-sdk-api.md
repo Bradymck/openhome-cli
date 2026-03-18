@@ -181,6 +181,50 @@ The CLI (`openhome-cli`) handles:
 
 ---
 
+## Already Working: WebSocket Chat + Ability Triggering
+
+We discovered the WebSocket endpoint is live:
+
+```
+wss://app.openhome.com/websocket/voice-stream/{API_KEY}/{AGENT_ID}
+```
+
+The CLI now has an `openhome chat` command that connects to this WebSocket and lets developers:
+- Send text messages to their agent from the terminal
+- **Trigger abilities by sending trigger words** (e.g., typing "play aquaprime" activates the ability)
+- Receive text responses back in real-time
+- Test ability trigger words without needing voice/browser
+
+This is a powerful development tool — developers can test whether their trigger words activate abilities correctly without leaving the terminal.
+
+---
+
+## Additional Feature Requests: Device/Agent Control
+
+The dashboard exposes these controls that would be valuable as SDK endpoints:
+
+### 5. Agent Control Endpoints (Proposed)
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/sdk/agents/restart` | Restart an agent (equivalent to "Restart Agent" button) |
+| `POST /api/sdk/agents/settings` | Update agent settings (voice, LLM, STT provider, temperature, etc.) |
+| `GET /api/sdk/agents/settings` | Read current agent settings |
+
+These would enable CLI commands like:
+- `openhome restart [agent]` — restart an agent remotely
+- `openhome config [agent] --voice <id>` — change voice settings
+- `openhome config [agent] --temperature 0.7` — adjust LLM temperature
+
+### 6. DevKit Hardware Control (Future)
+
+For OpenHome DevKit (Raspberry Pi) users, these would enable remote management:
+- Volume control
+- Start/stop agent session
+- Reboot device
+
+---
+
 ## Category Enum Clarification
 
 The web form uses three buttons: **Skill**, **Brain Skill**, **Background Daemon**. What string values should we send in the API?

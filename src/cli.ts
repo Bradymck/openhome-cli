@@ -13,6 +13,7 @@ import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
 import { agentsCommand } from "./commands/agents.js";
 import { logoutCommand } from "./commands/logout.js";
+import { chatCommand } from "./commands/chat.js";
 import { p, handleCancel, info } from "./ui/format.js";
 
 // Read version from package.json
@@ -94,6 +95,11 @@ async function interactiveMenu(): Promise<void> {
           hint: "Upload ability to OpenHome",
         },
         {
+          value: "chat",
+          label: "💬  Chat",
+          hint: "Talk to your agent (trigger abilities with keywords)",
+        },
+        {
           value: "list",
           label: "📋  My Abilities",
           hint: "List deployed abilities",
@@ -126,6 +132,9 @@ async function interactiveMenu(): Promise<void> {
         await deployCommand(dir);
         break;
       }
+      case "chat":
+        await chatCommand();
+        break;
       case "list":
         await listCommand();
         break;
@@ -192,6 +201,15 @@ program
       await deployCommand(path ?? ".", opts);
     },
   );
+
+program
+  .command("chat [agent]")
+  .description(
+    "Chat with an agent via WebSocket (send trigger words to activate abilities)",
+  )
+  .action(async (agent?: string) => {
+    await chatCommand(agent);
+  });
 
 program
   .command("list")
