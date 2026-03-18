@@ -9,6 +9,7 @@ export interface Personality {
   id: string;
   name: string;
   description?: string;
+  image?: string;
 }
 
 export interface GetPersonalitiesResponse {

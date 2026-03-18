@@ -93,7 +93,7 @@ export class ApiClient implements IApiClient {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: this.apiKey }),
+        body: JSON.stringify({ api_key: this.apiKey, with_image: true }),
       },
     );
     return data.personalities;
