@@ -1,7 +1,7 @@
 import { ApiClient, NotImplementedError } from "../api/client.js";
 import { MockApiClient } from "../api/mock-client.js";
 import { getApiKey, getConfig } from "../config/store.js";
-import { error, warn, info, header, table } from "../ui/format.js";
+import { error, warn, info, table, p } from "../ui/format.js";
 import type { TableRow } from "../ui/format.js";
 import chalk from "chalk";
 
@@ -23,7 +23,7 @@ function statusColor(status: string): string {
 export async function listCommand(
   opts: { mock?: boolean } = {},
 ): Promise<void> {
-  header("Abilities");
+  p.intro("📋 Your abilities");
 
   let client: ApiClient | MockApiClient;
 
@@ -38,11 +38,16 @@ export async function listCommand(
     client = new ApiClient(apiKey, getConfig().api_base_url);
   }
 
+  const s = p.spinner();
+  s.start("Fetching abilities...");
+
   try {
     const { abilities } = await client.listAbilities();
+    s.stop(`Found ${abilities.length} ability(s).`);
 
     if (abilities.length === 0) {
-      info("No abilities found. Run: openhome deploy");
+      info("No abilities found. Run: openhome init");
+      p.outro("Deploy your first ability with: openhome deploy");
       return;
     }
 
@@ -54,12 +59,15 @@ export async function listCommand(
       Updated: new Date(a.updated_at).toLocaleDateString(),
     }));
 
+    console.log("");
     table(rows);
-    console.log(`\n${abilities.length} ability(s) total.`);
+    p.outro(`${abilities.length} ability(s) total.`);
   } catch (err) {
+    s.stop("Failed.");
+
     if (err instanceof NotImplementedError) {
-      warn("The list endpoint is not yet available on the OpenHome server.");
-      warn("Use --mock to see example output.");
+      p.note("Use --mock to see example output.", "API Not Available Yet");
+      p.outro("List endpoint not yet implemented.");
       return;
     }
     error(

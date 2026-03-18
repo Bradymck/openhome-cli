@@ -1,22 +1,18 @@
-import { createInterface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { validateAbility } from "../validation/validator.js";
-import { success, error, warn, info, header } from "../ui/format.js";
+import { success, error, warn, info, p, handleCancel } from "../ui/format.js";
 
 type TemplateType = "basic" | "api";
 
 function toClassName(name: string): string {
   return name
     .split("-")
-    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join("");
 }
 
-function readTemplate(templateType: TemplateType, file: string): string {
-  // Templates live adjacent to this file in the repo but are embedded here
-  // to avoid runtime file resolution issues when installed globally.
+function getTemplate(templateType: TemplateType, file: string): string {
   const templates: Record<TemplateType, Record<string, string>> = {
     basic: {
       "main.py": `from src.agent.capability import MatchingCapability
@@ -122,98 +118,128 @@ function applyTemplate(content: string, vars: Record<string, string>): string {
 }
 
 export async function initCommand(nameArg?: string): Promise<void> {
-  header("Initialize New Ability");
+  p.intro("✨ Create a new OpenHome ability");
 
-  const rl = createInterface({ input, output });
-
+  // Step 1: Name
   let name: string;
-  try {
-    if (nameArg) {
-      name = nameArg.trim();
-    } else {
-      name = (
-        await rl.question("Ability name (lowercase, hyphens only): ")
-      ).trim();
-    }
-
-    if (!name || !/^[a-z][a-z0-9-]*$/.test(name)) {
+  if (nameArg) {
+    name = nameArg.trim();
+    if (!/^[a-z][a-z0-9-]*$/.test(name)) {
       error(
         "Invalid name. Use lowercase letters, numbers, and hyphens only. Must start with a letter.",
       );
       process.exit(1);
     }
-
-    const templateAnswer = (
-      await rl.question("Template type — [b]asic or [a]pi? (default: basic): ")
-    )
-      .trim()
-      .toLowerCase();
-
-    const templateType: TemplateType =
-      templateAnswer === "a" || templateAnswer === "api" ? "api" : "basic";
-
-    const hotwordInput = (
-      await rl.question(
-        'Trigger hotwords (comma-separated, e.g. "check weather, weather please"): ',
-      )
-    ).trim();
-
-    const hotwords = hotwordInput
-      ? hotwordInput
-          .split(",")
-          .map((h) => h.trim())
-          .filter(Boolean)
-      : [name.replace(/-/g, " ")];
-
-    const targetDir = resolve(name);
-
-    if (existsSync(targetDir)) {
-      error(`Directory "${name}" already exists. Aborted.`);
-      process.exit(1);
-    }
-
-    mkdirSync(targetDir, { recursive: true });
-
-    const className = toClassName(name);
-    const displayName = name
-      .split("-")
-      .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-      .join(" ");
-
-    const vars: Record<string, string> = {
-      CLASS_NAME: className,
-      UNIQUE_NAME: name,
-      DISPLAY_NAME: displayName,
-      HOTWORDS: JSON.stringify(hotwords),
-      HOTWORD_LIST: hotwords.map((h) => `- "${h}"`).join("\n"),
-    };
-
-    const files = ["main.py", "__init__.py", "README.md", "config.json"];
-    for (const file of files) {
-      const content = applyTemplate(readTemplate(templateType, file), vars);
-      writeFileSync(join(targetDir, file), content, "utf8");
-    }
-
-    info(`Created ability in ./${name}/`);
-    info("Running validation...\n");
-
-    const result = validateAbility(targetDir);
-    if (result.passed) {
-      success("Validation passed.");
-    } else {
-      for (const issue of result.errors) {
-        error(`${issue.file ? `[${issue.file}] ` : ""}${issue.message}`);
-      }
-    }
-    for (const w of result.warnings) {
-      warn(`${w.file ? `[${w.file}] ` : ""}${w.message}`);
-    }
-
-    success(`\nAbility "${name}" initialized. Next steps:`);
-    info(`  cd ${name}`);
-    info("  openhome validate");
-    info("  openhome deploy");
-  } finally {
-    rl.close();
+  } else {
+    const nameInput = await p.text({
+      message: "What should your ability be called?",
+      placeholder: "my-cool-ability",
+      validate: (val) => {
+        if (!val || !val.trim()) return "Name is required";
+        if (!/^[a-z][a-z0-9-]*$/.test(val.trim()))
+          return "Use lowercase letters, numbers, and hyphens only. Must start with a letter.";
+      },
+    });
+    handleCancel(nameInput);
+    name = (nameInput as string).trim();
   }
+
+  // Step 2: Template
+  const templateType = await p.select({
+    message: "Choose a template",
+    options: [
+      {
+        value: "basic",
+        label: "Basic",
+        hint: "Simple ability with speak + user_response",
+      },
+      {
+        value: "api",
+        label: "API",
+        hint: "Ability that calls an external API with secrets",
+      },
+    ],
+  });
+  handleCancel(templateType);
+
+  // Step 3: Hotwords
+  const hotwordInput = await p.text({
+    message: "Trigger words (comma-separated)",
+    placeholder: "check weather, weather please",
+    validate: (val) => {
+      if (!val || !val.trim()) return "At least one trigger word is required";
+    },
+  });
+  handleCancel(hotwordInput);
+
+  const hotwords = (hotwordInput as string)
+    .split(",")
+    .map((h) => h.trim())
+    .filter(Boolean);
+
+  // Step 4: Confirm
+  const targetDir = resolve(name);
+
+  if (existsSync(targetDir)) {
+    error(`Directory "${name}" already exists.`);
+    process.exit(1);
+  }
+
+  const confirmed = await p.confirm({
+    message: `Create ability "${name}" with ${hotwords.length} trigger word(s)?`,
+  });
+  handleCancel(confirmed);
+
+  if (!confirmed) {
+    p.cancel("Aborted.");
+    process.exit(0);
+  }
+
+  // Step 5: Generate files
+  const s = p.spinner();
+  s.start("Generating ability files...");
+
+  mkdirSync(targetDir, { recursive: true });
+
+  const className = toClassName(name);
+  const displayName = name
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+
+  const vars: Record<string, string> = {
+    CLASS_NAME: className,
+    UNIQUE_NAME: name,
+    DISPLAY_NAME: displayName,
+    HOTWORDS: JSON.stringify(hotwords),
+    HOTWORD_LIST: hotwords.map((h) => `- "${h}"`).join("\n"),
+  };
+
+  const files = ["main.py", "__init__.py", "README.md", "config.json"];
+  for (const file of files) {
+    const content = applyTemplate(
+      getTemplate(templateType as TemplateType, file),
+      vars,
+    );
+    writeFileSync(join(targetDir, file), content, "utf8");
+  }
+
+  s.stop("Files generated.");
+
+  // Step 6: Auto-validate
+  const result = validateAbility(targetDir);
+  if (result.passed) {
+    success("Validation passed.");
+  } else {
+    for (const issue of result.errors) {
+      error(`${issue.file ? `[${issue.file}] ` : ""}${issue.message}`);
+    }
+  }
+  for (const w of result.warnings) {
+    warn(`${w.file ? `[${w.file}] ` : ""}${w.message}`);
+  }
+
+  p.note(`cd ${name}\nopenhome validate\nopenhome deploy`, "Next steps");
+
+  p.outro(`Ability "${name}" is ready! 🎉`);
 }

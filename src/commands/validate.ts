@@ -1,43 +1,53 @@
 import { resolve } from "node:path";
 import { validateAbility } from "../validation/validator.js";
-import { success, error, warn, info, header } from "../ui/format.js";
+import { success, error, warn, p } from "../ui/format.js";
 import chalk from "chalk";
 
 export async function validateCommand(pathArg: string = "."): Promise<void> {
   const targetDir = resolve(pathArg);
-  header(`Validating: ${targetDir}`);
+  p.intro(`🔎 Validate ability`);
+
+  const s = p.spinner();
+  s.start("Running checks...");
 
   const result = validateAbility(targetDir);
 
   if (result.errors.length === 0 && result.warnings.length === 0) {
-    success("All checks passed — ability is ready to deploy.");
+    s.stop("All checks passed.");
+    p.outro("Ability is ready to deploy! 🎉");
     return;
   }
 
+  s.stop("Checks complete.");
+
   if (result.errors.length > 0) {
-    info(`${chalk.red.bold(String(result.errors.length))} error(s) found:\n`);
-    for (const issue of result.errors) {
-      error(
-        `${issue.file ? chalk.bold(`[${issue.file}]`) + " " : ""}${issue.message}`,
-      );
-    }
+    p.note(
+      result.errors
+        .map(
+          (issue) =>
+            `${chalk.red("✗")} ${issue.file ? chalk.bold(`[${issue.file}]`) + " " : ""}${issue.message}`,
+        )
+        .join("\n"),
+      `${result.errors.length} Error(s)`,
+    );
   }
 
   if (result.warnings.length > 0) {
-    console.log("");
-    info(`${chalk.yellow.bold(String(result.warnings.length))} warning(s):\n`);
-    for (const w of result.warnings) {
-      warn(`${w.file ? chalk.bold(`[${w.file}]`) + " " : ""}${w.message}`);
-    }
+    p.note(
+      result.warnings
+        .map(
+          (w) =>
+            `${chalk.yellow("⚠")} ${w.file ? chalk.bold(`[${w.file}]`) + " " : ""}${w.message}`,
+        )
+        .join("\n"),
+      `${result.warnings.length} Warning(s)`,
+    );
   }
 
   if (result.passed) {
-    console.log("");
-    success("Validation passed (with warnings).");
-    process.exit(0);
+    p.outro("Validation passed (with warnings).");
   } else {
-    console.log("");
-    error("Validation failed. Fix errors before deploying.");
+    error("Fix errors before deploying.");
     process.exit(1);
   }
 }

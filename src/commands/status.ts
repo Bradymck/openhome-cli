@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { ApiClient, NotImplementedError } from "../api/client.js";
 import { MockApiClient } from "../api/mock-client.js";
 import { getApiKey, getConfig } from "../config/store.js";
-import { success, error, warn, info, header } from "../ui/format.js";
+import { error, warn, p } from "../ui/format.js";
 import chalk from "chalk";
 
 function statusBadge(status: string): string {
@@ -49,7 +49,7 @@ export async function statusCommand(
     process.exit(1);
   }
 
-  header(`Status: ${abilityId}`);
+  p.intro(`🔍 Status: ${abilityId}`);
 
   let client: ApiClient | MockApiClient;
 
@@ -64,43 +64,57 @@ export async function statusCommand(
     client = new ApiClient(apiKey, getConfig().api_base_url);
   }
 
+  const s = p.spinner();
+  s.start("Fetching status...");
+
   try {
     const ability = await client.getAbility(abilityId);
+    s.stop("Status loaded.");
 
-    info(`Name:       ${ability.unique_name}`);
-    info(`Display:    ${ability.display_name}`);
-    info(`Status:     ${statusBadge(ability.status)}`);
-    info(`Version:    v${ability.version}`);
-    info(`Updated:    ${new Date(ability.updated_at).toLocaleString()}`);
-    info(`Created:    ${new Date(ability.created_at).toLocaleString()}`);
+    // Main info
+    p.note(
+      [
+        `Name:       ${ability.unique_name}`,
+        `Display:    ${ability.display_name}`,
+        `Status:     ${statusBadge(ability.status)}`,
+        `Version:    v${ability.version}`,
+        `Updated:    ${new Date(ability.updated_at).toLocaleString()}`,
+        `Created:    ${new Date(ability.created_at).toLocaleString()}`,
+        ability.personality_ids.length > 0
+          ? `Linked to:  ${ability.personality_ids.join(", ")}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      "Ability Details",
+    );
 
-    if (ability.personality_ids.length > 0) {
-      info(`Linked to:  ${ability.personality_ids.join(", ")}`);
-    }
-
+    // Validation errors
     if (ability.validation_errors.length > 0) {
-      console.log("");
-      warn("Validation errors:");
-      for (const e of ability.validation_errors) {
-        error(`  ${e}`);
-      }
+      p.note(
+        ability.validation_errors.map((e) => chalk.red(`✗ ${e}`)).join("\n"),
+        "Validation Errors",
+      );
     }
 
+    // Deploy history
     if (ability.deploy_history.length > 0) {
-      console.log("");
-      info("Deploy history:");
-      for (const event of ability.deploy_history) {
+      const historyLines = ability.deploy_history.map((event) => {
         const icon =
           event.status === "success" ? chalk.green("✓") : chalk.red("✗");
-        console.log(
-          `  ${icon}  v${event.version}  ${event.message}  ${chalk.gray(new Date(event.timestamp).toLocaleString())}`,
-        );
-      }
+        return `${icon}  v${event.version}  ${event.message}  ${chalk.gray(new Date(event.timestamp).toLocaleString())}`;
+      });
+
+      p.note(historyLines.join("\n"), "Deploy History");
     }
+
+    p.outro("Done.");
   } catch (err) {
+    s.stop("Failed.");
+
     if (err instanceof NotImplementedError) {
-      warn("The status endpoint is not yet available on the OpenHome server.");
-      warn("Use --mock to see example output.");
+      p.note("Use --mock to see example output.", "API Not Available Yet");
+      p.outro("Status endpoint not yet implemented.");
       return;
     }
     error(

@@ -1,4 +1,8 @@
 import chalk from "chalk";
+import * as p from "@clack/prompts";
+
+// Re-export clack for direct use in commands
+export { p };
 
 export function success(msg: string): void {
   console.log(chalk.green(`✓ ${msg}`));
@@ -74,10 +78,18 @@ export function spinner(msg: string): { stop: (finalMsg?: string) => void } {
   return {
     stop(finalMsg?: string) {
       clearInterval(interval);
-      process.stdout.write("\r");
+      process.stdout.write("\r" + " ".repeat(msg.length + 4) + "\r");
       if (finalMsg) {
         console.log(finalMsg);
       }
     },
   };
+}
+
+/** Check if user cancelled a clack prompt (Ctrl+C) */
+export function handleCancel(value: unknown): void {
+  if (p.isCancel(value)) {
+    p.cancel("Operation cancelled.");
+    process.exit(0);
+  }
 }
