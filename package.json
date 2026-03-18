@@ -1,0 +1,31 @@
+{
+  "name": "openhome-cli",
+  "version": "0.1.0",
+  "description": "CLI for managing OpenHome voice AI abilities",
+  "type": "module",
+  "bin": { "openhome": "./bin/openhome.js" },
+  "main": "dist/cli.js",
+  "scripts": {
+    "build": "tsup src/cli.ts --format esm --dts --clean",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "engines": { "node": ">=18" },
+  "keywords": ["openhome", "voice", "ai", "cli", "abilities"],
+  "author": "Bradymck <mckmuze@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "chalk": "^5.3.0",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/archiver": "^6.0.3",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.9"
+  }
+}
