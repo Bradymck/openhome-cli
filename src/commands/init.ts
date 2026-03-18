@@ -1,5 +1,12 @@
-import { mkdirSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
-import { join, resolve, extname } from "node:path";
+import {
+  mkdirSync,
+  writeFileSync,
+  copyFileSync,
+  existsSync,
+  readdirSync,
+} from "node:fs";
+import { join, resolve, extname, basename } from "node:path";
+import { homedir } from "node:os";
 import { validateAbility } from "../validation/validator.js";
 import { registerAbility } from "../config/store.js";
 import { success, error, warn, info, p, handleCancel } from "../ui/format.js";
@@ -216,21 +223,99 @@ export async function initCommand(nameArg?: string): Promise<void> {
     .map((h) => h.trim())
     .filter(Boolean);
 
-  // Step 6: Icon image
-  const iconInput = await p.text({
-    message: "Path to icon image (PNG or JPG for marketplace)",
-    placeholder: "./icon.png",
-    validate: (val) => {
-      if (!val || !val.trim()) return "An icon image is required";
-      const resolved = resolve(val.trim());
-      if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
-      const ext = extname(resolved).toLowerCase();
-      if (![".png", ".jpg", ".jpeg"].includes(ext))
-        return "Image must be PNG or JPG";
-    },
-  });
-  handleCancel(iconInput);
-  const iconSourcePath = resolve((iconInput as string).trim());
+  // Step 6: Icon image — scan common folders for images
+  const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg"]);
+  const home = homedir();
+
+  // Platform-agnostic: only add dirs that exist on this OS
+  const candidateDirs = [
+    process.cwd(),
+    join(home, "Desktop"),
+    join(home, "Downloads"),
+    join(home, "Pictures"), // macOS / Linux
+    join(home, "Images"), // some Linux distros
+    join(home, ".openhome", "icons"),
+  ];
+  // Windows: check known folder paths via env vars
+  if (process.env.USERPROFILE) {
+    candidateDirs.push(
+      join(process.env.USERPROFILE, "Desktop"),
+      join(process.env.USERPROFILE, "Downloads"),
+      join(process.env.USERPROFILE, "Pictures"),
+    );
+  }
+  // Deduplicate (e.g. home === USERPROFILE on Windows)
+  const scanDirs = [...new Set(candidateDirs)];
+
+  const foundImages: { path: string; label: string }[] = [];
+  for (const dir of scanDirs) {
+    if (!existsSync(dir)) continue;
+    try {
+      const files = readdirSync(dir);
+      for (const file of files) {
+        if (IMAGE_EXTS.has(extname(file).toLowerCase())) {
+          const full = join(dir, file);
+          const shortDir = dir.startsWith(home)
+            ? `~${dir.slice(home.length)}`
+            : dir;
+          foundImages.push({
+            path: full,
+            label: `${file}  (${shortDir})`,
+          });
+        }
+      }
+    } catch {
+      // skip unreadable dirs
+    }
+  }
+
+  let iconSourcePath: string;
+
+  if (foundImages.length > 0) {
+    const imageOptions = [
+      ...foundImages.map((img) => ({ value: img.path, label: img.label })),
+      { value: "__custom__", label: "Other...", hint: "Enter a path manually" },
+    ];
+
+    const selected = await p.select({
+      message: "Select an icon image (PNG or JPG for marketplace)",
+      options: imageOptions,
+    });
+    handleCancel(selected);
+
+    if (selected === "__custom__") {
+      const iconInput = await p.text({
+        message: "Path to icon image",
+        placeholder: "./icon.png",
+        validate: (val) => {
+          if (!val || !val.trim()) return "An icon image is required";
+          const resolved = resolve(val.trim());
+          if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
+          const ext = extname(resolved).toLowerCase();
+          if (!IMAGE_EXTS.has(ext)) return "Image must be PNG or JPG";
+        },
+      });
+      handleCancel(iconInput);
+      iconSourcePath = resolve((iconInput as string).trim());
+    } else {
+      iconSourcePath = selected as string;
+    }
+  } else {
+    const iconInput = await p.text({
+      message: "Path to icon image (PNG or JPG for marketplace)",
+      placeholder: "./icon.png",
+      validate: (val) => {
+        if (!val || !val.trim()) return "An icon image is required";
+        const resolved = resolve(val.trim());
+        if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
+        const ext = extname(resolved).toLowerCase();
+        if (!IMAGE_EXTS.has(ext)) return "Image must be PNG or JPG";
+      },
+    });
+    handleCancel(iconInput);
+    iconSourcePath = resolve((iconInput as string).trim());
+  }
+
   const iconExt = extname(iconSourcePath).toLowerCase();
   const iconFileName = iconExt === ".jpeg" ? "icon.jpg" : `icon${iconExt}`;
 
