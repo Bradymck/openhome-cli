@@ -1,0 +1,6 @@
+{
+  "unique_name": "test",
+  "description": "A fun ability",
+  "category": "skill",
+  "matching_hotwords": ["check"]
+}

@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { validateAbility } from "../validation/validator.js";
+import { registerAbility } from "../config/store.js";
 import { success, error, warn, info, p, handleCancel } from "../ui/format.js";
 
 type TemplateType = "basic" | "api";
@@ -265,6 +266,9 @@ export async function initCommand(nameArg?: string): Promise<void> {
   }
 
   s.stop("Files generated.");
+
+  // Track ability in config for deploy picker
+  registerAbility(name, targetDir);
 
   // Step 6: Auto-validate
   const result = validateAbility(targetDir);

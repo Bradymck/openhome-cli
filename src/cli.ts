@@ -1,10 +1,11 @@
 import { Command } from "commander";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { readFileSync } from "node:fs";
 
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, basename } from "node:path";
 
 import { loginCommand } from "./commands/login.js";
 import { initCommand } from "./commands/init.js";
@@ -36,15 +37,60 @@ function detectAbility(dir: string): boolean {
   return existsSync(resolve(dir, "config.json"));
 }
 
-/** Resolve the ability directory — auto-detect current dir or prompt. */
+/** Resolve the ability directory — pick from tracked abilities, detect cwd, or prompt. */
 async function resolveAbilityDir(): Promise<string> {
+  const { getTrackedAbilities } = await import("./config/store.js");
+  const tracked = getTrackedAbilities();
   const cwd = process.cwd();
-  if (detectAbility(cwd)) {
-    info(`Detected ability in current directory: ${cwd}`);
-    return cwd;
+  const cwdIsAbility = detectAbility(cwd);
+
+  // Build options from tracked abilities + cwd if it's an ability not already tracked
+  const options: { value: string; label: string; hint?: string }[] = [];
+
+  for (const a of tracked) {
+    options.push({
+      value: a.path,
+      label: a.name,
+      hint: a.path.startsWith(homedir())
+        ? `~${a.path.slice(homedir().length)}`
+        : a.path,
+    });
   }
 
-  // Not in an ability dir — ask for path
+  if (cwdIsAbility && !tracked.some((a) => a.path === cwd)) {
+    options.push({
+      value: cwd,
+      label: basename(cwd),
+      hint: "(current directory)",
+    });
+  }
+
+  // If we have exactly one option, auto-select it
+  if (options.length === 1) {
+    info(`Using ability: ${options[0].label} (${options[0].hint})`);
+    return options[0].value;
+  }
+
+  // If we have multiple options, let user pick
+  if (options.length > 0) {
+    options.push({
+      value: "__custom__",
+      label: "Other...",
+      hint: "Enter a path manually",
+    });
+
+    const selected = await p.select({
+      message: "Which ability do you want to deploy?",
+      options,
+    });
+    handleCancel(selected);
+
+    if (selected !== "__custom__") {
+      return selected as string;
+    }
+  }
+
+  // Fallback: manual path entry
   const path = await p.text({
     message: "Path to ability directory",
     placeholder: "./my-ability",
@@ -56,7 +102,7 @@ async function resolveAbilityDir(): Promise<string> {
     },
   });
   handleCancel(path);
-  return (path as string).trim();
+  return resolve((path as string).trim());
 }
 
 async function ensureLoggedIn(): Promise<void> {
