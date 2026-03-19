@@ -1,5 +1,11 @@
-import { resolve, join, basename } from "node:path";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { resolve, join, basename, extname } from "node:path";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  readdirSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { validateAbility } from "../validation/validator.js";
 import { createAbilityZip } from "../util/zip.js";
@@ -180,26 +186,96 @@ export async function deployCommand(
     category = catChoice as AbilityCategory;
   }
 
-  // Step 5: Resolve image (auto-detect or prompt)
+  // Step 5: Resolve image (auto-detect or prompt with picker)
   let imagePath = findIcon(targetDir);
   if (imagePath) {
     info(`Found icon: ${basename(imagePath)}`);
   } else {
-    const imgInput = await p.text({
-      message: "Path to ability icon image (PNG or JPG, required)",
-      placeholder: "./icon.png",
-      validate: (val) => {
-        if (!val || !val.trim())
-          return "An icon image is required for deployment";
-        const resolved = resolve(val.trim());
-        if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
-        const ext = resolved.split(".").pop()?.toLowerCase();
-        if (!ext || !IMAGE_EXTENSIONS.includes(ext))
-          return "Image must be PNG or JPG";
-      },
-    });
-    handleCancel(imgInput);
-    imagePath = resolve((imgInput as string).trim());
+    // Scan common folders for images
+    const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg"]);
+    const home = homedir();
+    const scanDirs = [
+      ...new Set([
+        process.cwd(),
+        targetDir,
+        join(home, "Desktop"),
+        join(home, "Downloads"),
+        join(home, "Pictures"),
+        join(home, "Images"),
+        join(home, ".openhome", "icons"),
+      ]),
+    ];
+
+    const foundImages: { path: string; label: string }[] = [];
+    for (const dir of scanDirs) {
+      if (!existsSync(dir)) continue;
+      try {
+        for (const file of readdirSync(dir)) {
+          if (IMAGE_EXTS.has(extname(file).toLowerCase())) {
+            const full = join(dir, file);
+            const shortDir = dir.startsWith(home)
+              ? `~${dir.slice(home.length)}`
+              : dir;
+            foundImages.push({
+              path: full,
+              label: `${file}  (${shortDir})`,
+            });
+          }
+        }
+      } catch {
+        // skip unreadable dirs
+      }
+    }
+
+    if (foundImages.length > 0) {
+      const imageOptions = [
+        ...foundImages.map((img) => ({ value: img.path, label: img.label })),
+        {
+          value: "__custom__",
+          label: "Other...",
+          hint: "Enter a path manually",
+        },
+      ];
+
+      const selected = await p.select({
+        message: "Select an icon image (PNG or JPG for marketplace)",
+        options: imageOptions,
+      });
+      handleCancel(selected);
+
+      if (selected === "__custom__") {
+        const imgInput = await p.text({
+          message: "Path to icon image",
+          placeholder: "./icon.png",
+          validate: (val) => {
+            if (!val || !val.trim()) return "An icon image is required";
+            const resolved = resolve(val.trim());
+            if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
+            if (!IMAGE_EXTS.has(extname(resolved).toLowerCase()))
+              return "Image must be PNG or JPG";
+          },
+        });
+        handleCancel(imgInput);
+        imagePath = resolve((imgInput as string).trim());
+      } else {
+        imagePath = selected as string;
+      }
+    } else {
+      const imgInput = await p.text({
+        message: "Path to ability icon image (PNG or JPG, required)",
+        placeholder: "./icon.png",
+        validate: (val) => {
+          if (!val || !val.trim())
+            return "An icon image is required for deployment";
+          const resolved = resolve(val.trim());
+          if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
+          if (!IMAGE_EXTS.has(extname(resolved).toLowerCase()))
+            return "Image must be PNG or JPG";
+        },
+      });
+      handleCancel(imgInput);
+      imagePath = resolve((imgInput as string).trim());
+    }
   }
 
   const imageBuffer = readFileSync(imagePath);

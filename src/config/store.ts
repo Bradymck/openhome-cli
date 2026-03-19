@@ -1,4 +1,10 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  readdirSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { keychainGet, keychainSet } from "./keychain.js";
@@ -78,14 +84,46 @@ export function registerAbility(name: string, absPath: string): void {
 
 export function getTrackedAbilities(): TrackedAbility[] {
   const config = getConfig();
-  return (config.abilities ?? []).filter((a) => {
-    // Only return abilities whose directories still exist
+  const tracked = (config.abilities ?? []).filter((a) => {
     try {
       return existsSync(join(a.path, "config.json"));
     } catch {
       return false;
     }
   });
+
+  // Auto-discover abilities in ./abilities/ that aren't tracked yet
+  const abilitiesDir = join(process.cwd(), "abilities");
+  if (existsSync(abilitiesDir)) {
+    try {
+      const dirs = readdirSync(abilitiesDir, { withFileTypes: true });
+      for (const d of dirs) {
+        if (!d.isDirectory()) continue;
+        const dirPath = join(abilitiesDir, d.name);
+        const configPath = join(dirPath, "config.json");
+        if (!existsSync(configPath)) continue;
+        if (tracked.some((a) => a.path === dirPath)) continue;
+
+        // Read name from config.json
+        try {
+          const abilityConfig = JSON.parse(
+            readFileSync(configPath, "utf8"),
+          ) as { unique_name?: string };
+          tracked.push({
+            name: abilityConfig.unique_name ?? d.name,
+            path: dirPath,
+            created_at: new Date().toISOString(),
+          });
+        } catch {
+          // skip unreadable configs
+        }
+      }
+    } catch {
+      // skip if abilities/ can't be read
+    }
+  }
+
+  return tracked;
 }
 
 export function saveApiKey(key: string): void {
