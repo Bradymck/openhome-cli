@@ -816,10 +816,12 @@ export async function initCommand(nameArg?: string): Promise<void> {
   const iconFileName = iconExt === ".jpeg" ? "icon.jpg" : `icon${iconExt}`;
 
   // Step 7: Confirm
-  const targetDir = resolve(name);
+  // Scaffold into abilities/ subdirectory to keep repo root clean
+  const abilitiesDir = resolve("abilities");
+  const targetDir = join(abilitiesDir, name);
 
   if (existsSync(targetDir)) {
-    error(`Directory "${name}" already exists.`);
+    error(`Directory "abilities/${name}" already exists.`);
     process.exit(1);
   }
 
@@ -887,7 +889,7 @@ export async function initCommand(nameArg?: string): Promise<void> {
     warn(`${w.file ? `[${w.file}] ` : ""}${w.message}`);
   }
 
-  p.note(`cd ${name}\nopenhome deploy`, "Next steps");
+  p.note(`cd abilities/${name}\nopenhome deploy`, "Next steps");
 
   p.outro(`Ability "${name}" is ready!`);
 }
