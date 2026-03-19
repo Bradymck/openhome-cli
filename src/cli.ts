@@ -11,6 +11,10 @@ import { statusCommand } from "./commands/status.js";
 import { agentsCommand } from "./commands/agents.js";
 import { logoutCommand } from "./commands/logout.js";
 import { chatCommand } from "./commands/chat.js";
+import { triggerCommand } from "./commands/trigger.js";
+import { whoamiCommand } from "./commands/whoami.js";
+import { configEditCommand } from "./commands/config-edit.js";
+import { logsCommand } from "./commands/logs.js";
 import { p, handleCancel } from "./ui/format.js";
 
 // Read version from package.json
@@ -49,14 +53,9 @@ async function interactiveMenu(): Promise<void> {
       message: "What would you like to do?",
       options: [
         {
-          value: "logout",
-          label: "🔓  Log Out",
-          hint: "Clear credentials and re-authenticate",
-        },
-        {
           value: "init",
           label: "✨  Create Ability",
-          hint: "Scaffold a new ability",
+          hint: "Scaffold a new ability from templates",
         },
         {
           value: "deploy",
@@ -66,7 +65,12 @@ async function interactiveMenu(): Promise<void> {
         {
           value: "chat",
           label: "💬  Chat",
-          hint: "Talk to your agent (trigger abilities with keywords)",
+          hint: "Talk to your agent",
+        },
+        {
+          value: "trigger",
+          label: "⚡  Trigger",
+          hint: "Fire an ability remotely with a phrase",
         },
         {
           value: "list",
@@ -83,16 +87,32 @@ async function interactiveMenu(): Promise<void> {
           label: "🔍  Status",
           hint: "Check ability status",
         },
+        {
+          value: "config",
+          label: "⚙️   Edit Config",
+          hint: "Update trigger words, description, category",
+        },
+        {
+          value: "logs",
+          label: "📡  Logs",
+          hint: "Stream live agent messages",
+        },
+        {
+          value: "whoami",
+          label: "👤  Who Am I",
+          hint: "Show auth, default agent, tracked abilities",
+        },
+        {
+          value: "logout",
+          label: "🔓  Log Out",
+          hint: "Clear credentials and re-authenticate",
+        },
         { value: "exit", label: "👋  Exit", hint: "Quit" },
       ],
     });
     handleCancel(choice);
 
     switch (choice) {
-      case "logout":
-        await logoutCommand();
-        await ensureLoggedIn();
-        break;
       case "init":
         await initCommand();
         break;
@@ -102,6 +122,9 @@ async function interactiveMenu(): Promise<void> {
       case "chat":
         await chatCommand();
         break;
+      case "trigger":
+        await triggerCommand();
+        break;
       case "list":
         await listCommand();
         break;
@@ -110,6 +133,19 @@ async function interactiveMenu(): Promise<void> {
         break;
       case "status":
         await statusCommand();
+        break;
+      case "config":
+        await configEditCommand();
+        break;
+      case "logs":
+        await logsCommand();
+        break;
+      case "whoami":
+        await whoamiCommand();
+        break;
+      case "logout":
+        await logoutCommand();
+        await ensureLoggedIn();
         break;
       case "exit":
         running = false;
@@ -149,7 +185,7 @@ program
 
 program
   .command("init [name]")
-  .description("Scaffold a new ability in a new directory")
+  .description("Scaffold a new ability from templates")
   .action(async (name?: string) => {
     await initCommand(name);
   });
@@ -171,11 +207,17 @@ program
 
 program
   .command("chat [agent]")
-  .description(
-    "Chat with an agent via WebSocket (send trigger words to activate abilities)",
-  )
+  .description("Chat with an agent via WebSocket")
   .action(async (agent?: string) => {
     await chatCommand(agent);
+  });
+
+program
+  .command("trigger [phrase]")
+  .description("Send a trigger phrase to fire an ability remotely")
+  .option("--agent <id>", "Agent ID (uses default if not set)")
+  .action(async (phrase?: string, opts?: { agent?: string }) => {
+    await triggerCommand(phrase, opts);
   });
 
 program
@@ -196,12 +238,32 @@ program
 
 program
   .command("status [ability]")
-  .description(
-    "Show detailed status of an ability (by name or from config.json)",
-  )
+  .description("Show detailed status of an ability")
   .option("--mock", "Use mock API client")
   .action(async (ability: string | undefined, opts: { mock?: boolean }) => {
     await statusCommand(ability, opts);
+  });
+
+program
+  .command("config [path]")
+  .description("Edit trigger words, description, or category in config.json")
+  .action(async (path?: string) => {
+    await configEditCommand(path);
+  });
+
+program
+  .command("logs")
+  .description("Stream live agent messages and logs")
+  .option("--agent <id>", "Agent ID (uses default if not set)")
+  .action(async (opts: { agent?: string }) => {
+    await logsCommand(opts);
+  });
+
+program
+  .command("whoami")
+  .description("Show auth status, default agent, and tracked abilities")
+  .action(async () => {
+    await whoamiCommand();
   });
 
 // ── Entry point: menu if no args, subcommand otherwise ───────────
