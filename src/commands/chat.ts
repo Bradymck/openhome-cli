@@ -159,21 +159,21 @@ export async function chatCommand(
             const data = msg.data as WsTextData;
             if (data.content && data.role === "assistant") {
               if (data.live && !data.final) {
-                // Streaming token — accumulate
-                process.stdout.write(
-                  currentResponse === ""
-                    ? `${chalk.cyan("Agent:")} ${data.content}`
-                    : data.content,
-                );
-                currentResponse += data.content;
+                // Streaming — OpenHome sends the full accumulated text each time,
+                // not just the new token. Clear the line and rewrite.
+                const prefix = `${chalk.cyan("Agent:")} `;
+                readline.clearLine(process.stdout, 0);
+                readline.cursorTo(process.stdout, 0);
+                process.stdout.write(`${prefix}${data.content}`);
+                currentResponse = data.content;
               } else {
                 // Final message
-                if (currentResponse === "") {
+                if (currentResponse !== "") {
+                  // End of stream — just add newline after the streamed line
+                  console.log("");
+                } else {
                   // Non-streamed complete message
                   console.log(`${chalk.cyan("Agent:")} ${data.content}`);
-                } else {
-                  // End of stream
-                  console.log(""); // newline after streaming
                 }
                 currentResponse = "";
                 console.log("");
