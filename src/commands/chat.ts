@@ -15,7 +15,10 @@ interface WsTextData {
   content: string;
   role: string;
   live?: boolean;
+  final?: boolean;
 }
+
+const PING_INTERVAL = 30_000;
 
 export async function chatCommand(
   agentArg?: string,
@@ -110,7 +113,7 @@ export async function chatCommand(
           return;
         }
 
-        // Send text message to agent
+        // Send text message to agent (same as useOpenHomeVoice.sendText)
         ws.send(
           JSON.stringify({
             type: "transcribed",
@@ -123,34 +126,18 @@ export async function chatCommand(
       });
     }
 
-    // Keep connection alive with periodic pings (docs recommend every 30s)
-    let keepAliveInterval: ReturnType<typeof setInterval> | null = null;
+    // Keepalive ping every 30s (matches browser implementation)
+    let pingInterval: ReturnType<typeof setInterval> | null = null;
 
     ws.on("open", () => {
       connected = true;
 
-      // Server expects audio to flow — send a silent PCM frame to
-      // satisfy the protocol, then switch to text-only.
-      // 16-bit PCM, 16 kHz, 100ms = 3200 bytes of silence
-      const silence = Buffer.alloc(3200, 0);
-      ws.send(
-        JSON.stringify({
-          type: "audio",
-          data: silence.toString("base64"),
-        }),
-      );
-
-      // Send periodic silence to keep the audio stream "alive"
-      keepAliveInterval = setInterval(() => {
+      // Keepalive ping — matches useOpenHomeVoice pattern
+      pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(
-            JSON.stringify({
-              type: "audio",
-              data: silence.toString("base64"),
-            }),
-          );
+          ws.send(JSON.stringify({ type: "ping" }));
         }
-      }, 5000);
+      }, PING_INTERVAL);
 
       success("Connected! Type a message and press Enter. Type /quit to exit.");
       console.log(
@@ -169,8 +156,8 @@ export async function chatCommand(
         switch (msg.type) {
           case "message": {
             const data = msg.data as WsTextData;
-            if (data.content) {
-              if (data.live) {
+            if (data.content && data.role === "assistant") {
+              if (data.live && !data.final) {
                 // Streaming token — accumulate
                 process.stdout.write(
                   currentResponse === ""
@@ -189,33 +176,56 @@ export async function chatCommand(
                 }
                 currentResponse = "";
                 console.log("");
-                promptUser();
               }
             }
             break;
           }
-          case "audio-init":
+          case "text": {
+            // Control messages from server
+            const textData = msg.data as string;
+            if (textData === "audio-init") {
+              // Server starting audio — tell it we're "playing"
+              ws.send(JSON.stringify({ type: "text", data: "bot-speaking" }));
+            } else if (textData === "audio-end") {
+              // Server done with audio — tell it we finished
+              ws.send(JSON.stringify({ type: "text", data: "bot-speak-end" }));
+              // If no text was streamed, show a note
+              if (currentResponse === "") {
+                console.log(
+                  chalk.gray("  (Agent sent audio — text-only mode)"),
+                );
+                console.log("");
+              }
+            }
             break;
+          }
           case "audio":
             // Acknowledge audio receipt (protocol requirement)
             ws.send(JSON.stringify({ type: "ack", data: "audio-received" }));
             break;
-          case "audio-end":
-            // Audio finished
-            if (currentResponse === "") {
-              console.log(
-                chalk.gray("  (Agent sent audio — not playable in terminal)"),
-              );
-              console.log("");
-              promptUser();
-            }
+          case "error-event": {
+            const errData = msg.data as {
+              message?: string;
+              title?: string;
+              close_connection?: boolean;
+            };
+            const errMsg =
+              errData?.message || errData?.title || "Unknown error";
+            error(`Server error: ${errMsg}`);
             break;
+          }
           case "interrupt":
             // Agent was interrupted
             if (currentResponse !== "") {
               console.log(""); // newline
               currentResponse = "";
             }
+            break;
+          case "action":
+          case "log":
+          case "question":
+          case "progress":
+            // Informational — ignore in CLI
             break;
           default:
             break;
@@ -233,7 +243,7 @@ export async function chatCommand(
     });
 
     ws.on("close", (code: number) => {
-      if (keepAliveInterval) clearInterval(keepAliveInterval);
+      if (pingInterval) clearInterval(pingInterval);
       console.log("");
       if (code === 1000) {
         info("Disconnected.");
