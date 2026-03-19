@@ -37,11 +37,8 @@ export async function agentsCommand(
 
     p.note(
       personalities
-        .map(
-          (pers) =>
-            `${chalk.bold(pers.name)}  ${chalk.gray(pers.id)}${pers.description ? `\n  ${pers.description}` : ""}`,
-        )
-        .join("\n\n"),
+        .map((pers) => `${chalk.bold(pers.name)}  ${chalk.gray(pers.id)}`)
+        .join("\n"),
       "Agents",
     );
 
@@ -64,7 +61,7 @@ export async function agentsCommand(
         options: personalities.map((pers) => ({
           value: pers.id,
           label: pers.name,
-          hint: pers.description ?? pers.id,
+          hint: pers.id,
         })),
       });
       handleCancel(selected);

@@ -1,9 +1,10 @@
 import { join, resolve } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { ApiClient, NotImplementedError } from "../api/client.js";
 import { MockApiClient } from "../api/mock-client.js";
-import { getApiKey, getConfig } from "../config/store.js";
-import { error, warn, p } from "../ui/format.js";
+import { getApiKey, getConfig, getTrackedAbilities } from "../config/store.js";
+import { error, warn, info, p, handleCancel } from "../ui/format.js";
 import chalk from "chalk";
 
 function statusBadge(status: string): string {
@@ -21,30 +22,78 @@ function statusBadge(status: string): string {
   }
 }
 
+/** Read unique_name from a config.json in a directory. */
+function readAbilityName(dir: string): string | null {
+  const configPath = join(dir, "config.json");
+  if (!existsSync(configPath)) return null;
+  try {
+    const cfg = JSON.parse(readFileSync(configPath, "utf8")) as {
+      unique_name?: string;
+    };
+    return cfg.unique_name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve ability name: check cwd, then pick from tracked abilities. */
+async function resolveAbilityName(): Promise<string | undefined> {
+  // Check current directory first
+  const cwdName = readAbilityName(resolve("."));
+  if (cwdName) {
+    info(`Detected ability: ${cwdName}`);
+    return cwdName;
+  }
+
+  // Build list from tracked abilities
+  const tracked = getTrackedAbilities();
+  const options: { value: string; label: string; hint?: string }[] = [];
+  const home = homedir();
+
+  for (const a of tracked) {
+    const name = readAbilityName(a.path);
+    if (name) {
+      options.push({
+        value: name,
+        label: a.name,
+        hint: a.path.startsWith(home)
+          ? `~${a.path.slice(home.length)}`
+          : a.path,
+      });
+    }
+  }
+
+  if (options.length === 1) {
+    info(`Using ability: ${options[0].label}`);
+    return options[0].value;
+  }
+
+  if (options.length > 0) {
+    const selected = await p.select({
+      message: "Which ability do you want to check?",
+      options,
+    });
+    handleCancel(selected);
+    return selected as string;
+  }
+
+  return undefined;
+}
+
 export async function statusCommand(
   abilityArg?: string,
   opts: { mock?: boolean } = {},
 ): Promise<void> {
   let abilityId = abilityArg;
 
-  // If no arg, try to read from local config.json
+  // If no arg, try to resolve from cwd or tracked abilities
   if (!abilityId) {
-    const localConfig = join(resolve("."), "config.json");
-    if (existsSync(localConfig)) {
-      try {
-        const cfg = JSON.parse(readFileSync(localConfig, "utf8")) as {
-          unique_name?: string;
-        };
-        abilityId = cfg.unique_name;
-      } catch {
-        // ignore
-      }
-    }
+    abilityId = await resolveAbilityName();
   }
 
   if (!abilityId) {
     error(
-      "No ability name specified. Pass a name or run from an ability directory.",
+      "No ability found. Pass a name, run from an ability directory, or create one with: openhome init",
     );
     process.exit(1);
   }

@@ -36,11 +36,8 @@ export async function loginCommand(): Promise<void> {
   if (agents.length > 0) {
     p.note(
       agents
-        .map(
-          (a) =>
-            `${chalk.bold(a.name)}  ${chalk.gray(a.id)}${a.description ? `\n  ${a.description}` : ""}`,
-        )
-        .join("\n\n"),
+        .map((a) => `${chalk.bold(a.name)}  ${chalk.gray(a.id)}`)
+        .join("\n"),
       `${agents.length} agent(s) on this account`,
     );
   } else {

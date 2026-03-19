@@ -73,7 +73,7 @@ export class ApiClient implements IApiClient {
         // ignore parse errors
       }
 
-      if (body?.error?.code === "NOT_IMPLEMENTED") {
+      if (body?.error?.code === "NOT_IMPLEMENTED" || response.status === 404) {
         throw new NotImplementedError(path);
       }
 
