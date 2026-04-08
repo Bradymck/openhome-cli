@@ -235,10 +235,15 @@ export async function deployCommand(
           label: "Other...",
           hint: "Enter a path manually",
         },
+        {
+          value: "__skip__",
+          label: "Skip",
+          hint: "Upload without an icon (optional)",
+        },
       ];
 
       const selected = await p.select({
-        message: "Select an icon image (PNG or JPG for marketplace)",
+        message: "Select an icon image (optional)",
         options: imageOptions,
       });
       handleCancel(selected);
@@ -248,7 +253,7 @@ export async function deployCommand(
           message: "Path to icon image",
           placeholder: "./icon.png",
           validate: (val) => {
-            if (!val || !val.trim()) return "An icon image is required";
+            if (!val || !val.trim()) return undefined;
             const resolved = resolve(val.trim());
             if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
             if (!IMAGE_EXTS.has(extname(resolved).toLowerCase()))
@@ -256,17 +261,18 @@ export async function deployCommand(
           },
         });
         handleCancel(imgInput);
-        imagePath = resolve((imgInput as string).trim());
-      } else {
+        const trimmed = (imgInput as string).trim();
+        if (trimmed) imagePath = resolve(trimmed);
+      } else if (selected !== "__skip__") {
         imagePath = selected as string;
       }
     } else {
       const imgInput = await p.text({
-        message: "Path to ability icon image (PNG or JPG, required)",
+        message:
+          "Path to ability icon image (PNG or JPG, optional — press Enter to skip)",
         placeholder: "./icon.png",
         validate: (val) => {
-          if (!val || !val.trim())
-            return "An icon image is required for deployment";
+          if (!val || !val.trim()) return undefined;
           const resolved = resolve(val.trim());
           if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
           if (!IMAGE_EXTS.has(extname(resolved).toLowerCase()))
@@ -274,12 +280,13 @@ export async function deployCommand(
         },
       });
       handleCancel(imgInput);
-      imagePath = resolve((imgInput as string).trim());
+      const trimmed = (imgInput as string).trim();
+      if (trimmed) imagePath = resolve(trimmed);
     }
   }
 
-  const imageBuffer = readFileSync(imagePath);
-  const imageName = basename(imagePath);
+  const imageBuffer = imagePath ? readFileSync(imagePath) : null;
+  const imageName = imagePath ? basename(imagePath) : null;
 
   const personalityId = opts.personality ?? getConfig().default_personality_id;
 
@@ -299,7 +306,7 @@ export async function deployCommand(
         `Name:        ${uniqueName}`,
         `Description: ${description}`,
         `Category:    ${category}`,
-        `Image:       ${imageName}`,
+        `Image:       ${imageName ?? "(none)"}`,
         `Hotwords:    ${hotwords.join(", ")}`,
         `Agent:       ${personalityId ?? "(none set)"}`,
       ].join("\n"),
