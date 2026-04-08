@@ -107,7 +107,7 @@ export class ApiClient implements IApiClient {
   ): Promise<UploadAbilityResponse> {
     const form = new FormData();
     form.append(
-      "ability",
+      "zip_file",
       new Blob([zipBuffer as unknown as ArrayBuffer], {
         type: "application/zip",
       }),
@@ -118,7 +118,7 @@ export class ApiClient implements IApiClient {
     const imageMime =
       imageExt === "jpg" || imageExt === "jpeg" ? "image/jpeg" : "image/png";
     form.append(
-      "image",
+      "image_file",
       new Blob([imageBuffer as unknown as ArrayBuffer], { type: imageMime }),
       imageName,
     );
@@ -126,28 +126,25 @@ export class ApiClient implements IApiClient {
     form.append("name", metadata.name);
     form.append("description", metadata.description);
     form.append("category", metadata.category);
-    form.append(
-      "matching_hotwords",
-      JSON.stringify(metadata.matching_hotwords),
-    );
+    form.append("trigger_words", metadata.matching_hotwords.join(", "));
     if (metadata.personality_id) {
       form.append("personality_id", metadata.personality_id);
     }
 
-    return this.request<UploadAbilityResponse>(ENDPOINTS.abilities, {
+    return this.request<UploadAbilityResponse>(ENDPOINTS.uploadCapability, {
       method: "POST",
       body: form,
     });
   }
 
   async listAbilities(): Promise<ListAbilitiesResponse> {
-    return this.request<ListAbilitiesResponse>(ENDPOINTS.abilities, {
+    return this.request<ListAbilitiesResponse>(ENDPOINTS.listCapabilities, {
       method: "GET",
     });
   }
 
   async getAbility(id: string): Promise<GetAbilityResponse> {
-    return this.request<GetAbilityResponse>(ENDPOINTS.abilityDetail(id), {
+    return this.request<GetAbilityResponse>(ENDPOINTS.getCapability(id), {
       method: "GET",
     });
   }
