@@ -27,8 +27,6 @@ export interface UploadAbilityMetadata {
   personality_id?: string;
 }
 
-// Proposed endpoints (not yet implemented on server)
-
 export interface UploadAbilityResponse {
   ability_id: string;
   unique_name: string;
