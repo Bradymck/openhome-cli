@@ -4,8 +4,9 @@
   "description": "CLI for managing OpenHome voice AI abilities",
   "type": "module",
   "bin": {
-    "openhome": "./bin/openhome.js",
-    "openhome-mcp": "./bin/openhome-mcp.js"
+    "openhome": "bin/openhome.js",
+    "openhome-cli": "bin/openhome.js",
+    "openhome-mcp": "bin/openhome-mcp.js"
   },
   "main": "dist/cli.js",
   "scripts": {
