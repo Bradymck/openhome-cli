@@ -31,8 +31,8 @@ export interface IApiClient {
   getPersonalities(): Promise<Personality[]>;
   uploadAbility(
     zipBuffer: Buffer,
-    imageBuffer: Buffer,
-    imageName: string,
+    imageBuffer: Buffer | null,
+    imageName: string | null,
     metadata: UploadAbilityMetadata,
   ): Promise<UploadAbilityResponse>;
   listAbilities(): Promise<ListAbilitiesResponse>;
@@ -101,8 +101,8 @@ export class ApiClient implements IApiClient {
 
   async uploadAbility(
     zipBuffer: Buffer,
-    imageBuffer: Buffer,
-    imageName: string,
+    imageBuffer: Buffer | null,
+    imageName: string | null,
     metadata: UploadAbilityMetadata,
   ): Promise<UploadAbilityResponse> {
     const form = new FormData();
@@ -114,14 +114,16 @@ export class ApiClient implements IApiClient {
       "ability.zip",
     );
 
-    const imageExt = imageName.split(".").pop()?.toLowerCase() ?? "png";
-    const imageMime =
-      imageExt === "jpg" || imageExt === "jpeg" ? "image/jpeg" : "image/png";
-    form.append(
-      "image_file",
-      new Blob([imageBuffer as unknown as ArrayBuffer], { type: imageMime }),
-      imageName,
-    );
+    if (imageBuffer && imageName) {
+      const imageExt = imageName.split(".").pop()?.toLowerCase() ?? "png";
+      const imageMime =
+        imageExt === "jpg" || imageExt === "jpeg" ? "image/jpeg" : "image/png";
+      form.append(
+        "image_file",
+        new Blob([imageBuffer as unknown as ArrayBuffer], { type: imageMime }),
+        imageName,
+      );
+    }
 
     form.append("name", metadata.name);
     form.append("description", metadata.description);

@@ -53,8 +53,8 @@ export class MockApiClient implements IApiClient {
 
   async uploadAbility(
     _zipBuffer: Buffer,
-    _imageBuffer: Buffer,
-    _imageName: string,
+    _imageBuffer: Buffer | null,
+    _imageName: string | null,
     _metadata: UploadAbilityMetadata,
   ): Promise<UploadAbilityResponse> {
     return Promise.resolve({
