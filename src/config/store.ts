@@ -18,6 +18,7 @@ export interface TrackedAbility {
 export interface CliConfig {
   api_base_url?: string;
   default_personality_id?: string;
+  default_agent_id?: string;
   api_key?: string;
   jwt?: string;
   abilities?: TrackedAbility[];

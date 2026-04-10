@@ -355,10 +355,20 @@ program
 program
   .command("set-jwt [token]")
   .description(
-    "Save a session token to enable management commands (list, delete, toggle, assign)",
+    "Save a session token to enable deploy (list, delete, toggle, assign now use API key)",
   )
   .action(async (token?: string) => {
     await setJwtCommand(token);
+  });
+
+program
+  .command("mcp")
+  .description(
+    "Start the OpenHome MCP voice server for Claude Code integration",
+  )
+  .action(async () => {
+    // Launch voice-server directly in-process
+    await import("./mcp/voice-server.js");
   });
 
 // ── Entry point: menu if no args, subcommand otherwise ───────────
