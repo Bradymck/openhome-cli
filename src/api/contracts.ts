@@ -48,6 +48,27 @@ export interface AbilitySummary {
   updated_at: string;
 }
 
+// Extended with fields from the real API
+export interface AbilitySummaryWithExtras extends AbilitySummary {
+  trigger_words?: string[];
+  category?: string;
+}
+
+// Raw shape returned by get-installed-capabilities
+export interface InstalledCapability {
+  id: number;
+  name: string;
+  category: string;
+  enabled: boolean;
+  trigger_words: string[];
+  last_updated?: string;
+  image_file?: string;
+  default?: boolean;
+  system_capability?: boolean;
+  agent_capability?: boolean;
+  shortcut?: boolean;
+}
+
 export interface ListAbilitiesResponse {
   abilities: AbilitySummary[];
 }
@@ -74,4 +95,30 @@ export interface ApiErrorResponse {
     message: string;
     details?: Record<string, unknown>;
   };
+}
+
+// Verify API key
+export interface VerifyApiKeyResponse {
+  valid: boolean;
+  message?: string;
+}
+
+// Delete capability
+export interface DeleteCapabilityResponse {
+  message?: string;
+}
+
+// Toggle capability enabled/disabled
+export interface ToggleCapabilityResponse {
+  enabled?: boolean;
+  message?: string;
+}
+
+// Assign capabilities to a personality
+export interface AssignCapabilitiesRequest {
+  matching_capabilities: number[];
+}
+
+export interface AssignCapabilitiesResponse {
+  message?: string;
 }

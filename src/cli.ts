@@ -6,6 +6,9 @@ import { readFileSync } from "node:fs";
 import { loginCommand } from "./commands/login.js";
 import { initCommand } from "./commands/init.js";
 import { deployCommand } from "./commands/deploy.js";
+import { deleteCommand } from "./commands/delete.js";
+import { toggleCommand } from "./commands/toggle.js";
+import { assignCommand } from "./commands/assign.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
 import { agentsCommand } from "./commands/agents.js";
@@ -15,6 +18,8 @@ import { triggerCommand } from "./commands/trigger.js";
 import { whoamiCommand } from "./commands/whoami.js";
 import { configEditCommand } from "./commands/config-edit.js";
 import { logsCommand } from "./commands/logs.js";
+import { setJwtCommand } from "./commands/set-jwt.js";
+import { validateCommand } from "./commands/validate.js";
 import { p, handleCancel } from "./ui/format.js";
 
 // Read version from package.json
@@ -28,6 +33,57 @@ try {
   version = pkg.version ?? version;
 } catch {
   // fallback to default
+}
+
+// ── Auto-update check ────────────────────────────────────────────
+async function checkForUpdates(): Promise<void> {
+  // Skip if explicitly disabled or already running via auto-update re-exec
+  if (process.env.OPENHOME_NO_UPDATE === "1") return;
+
+  try {
+    const res = await fetch("https://registry.npmjs.org/openhome-cli/latest", {
+      signal: AbortSignal.timeout(2000),
+    });
+    const data = (await res.json()) as { version?: string };
+    const latest = data.version;
+    if (!latest || latest === version) return;
+
+    // Only act if npm version is strictly newer
+    const toNum = (v: string) =>
+      v
+        .split(".")
+        .map(Number)
+        .reduce((a, n) => a * 1000 + n, 0);
+    if (toNum(latest) <= toNum(version)) return;
+
+    // Detect npx: argv[1] contains _npx or npm_execpath points to npx
+    const arg1 = process.argv[1] ?? "";
+    const isNpx =
+      arg1.includes("_npx") ||
+      arg1.includes(".npm/") ||
+      (process.env.npm_execpath ?? "").includes("npx");
+
+    if (isNpx) {
+      // Re-exec with latest — user gets the new version transparently
+      const { execFileSync } = await import("node:child_process");
+      execFileSync(
+        "npx",
+        [`openhome-cli@${latest}`, ...process.argv.slice(2)],
+        { stdio: "inherit", env: { ...process.env, OPENHOME_NO_UPDATE: "1" } },
+      );
+      process.exit(0);
+    } else {
+      // Global install — show one-line notice, don't block
+      const { default: chalk } = await import("chalk");
+      console.log(
+        chalk.yellow(
+          `  Update available: v${version} → v${latest}   Run: npm install -g openhome-cli@latest\n`,
+        ),
+      );
+    }
+  } catch {
+    // Network timeout or error — continue silently
+  }
 }
 
 // ── Interactive menu (bare `openhome` with no args) ──────────────
@@ -53,24 +109,14 @@ async function interactiveMenu(): Promise<void> {
       message: "What would you like to do?",
       options: [
         {
-          value: "init",
-          label: "✨  Create Ability",
-          hint: "Scaffold a new ability from templates",
-        },
-        {
           value: "deploy",
-          label: "🚀  Deploy",
-          hint: "Upload ability to OpenHome",
+          label: "⬆️   Upload Ability",
+          hint: "Upload a zip file to OpenHome",
         },
         {
-          value: "chat",
-          label: "💬  Chat",
-          hint: "Talk to your agent",
-        },
-        {
-          value: "trigger",
-          label: "⚡  Trigger",
-          hint: "Fire an ability remotely with a phrase",
+          value: "init",
+          label: "✨  Scaffold Ability",
+          hint: "Generate a new ability from a template",
         },
         {
           value: "list",
@@ -78,29 +124,34 @@ async function interactiveMenu(): Promise<void> {
           hint: "List deployed abilities",
         },
         {
+          value: "delete",
+          label: "🗑️   Delete Ability",
+          hint: "Remove a deployed ability",
+        },
+        {
+          value: "toggle",
+          label: "⚡  Enable / Disable",
+          hint: "Toggle an ability on or off",
+        },
+        {
+          value: "assign",
+          label: "🔗  Assign to Agent",
+          hint: "Link abilities to an agent",
+        },
+        {
           value: "agents",
           label: "🤖  My Agents",
           hint: "View agents and set default",
         },
         {
-          value: "status",
-          label: "🔍  Status",
-          hint: "Check ability status",
-        },
-        {
-          value: "config",
-          label: "⚙️   Edit Config",
-          hint: "Update trigger words, description, category",
+          value: "chat",
+          label: "💬  Chat",
+          hint: "Talk to your agent",
         },
         {
           value: "logs",
           label: "📡  Logs",
           hint: "Stream live agent messages",
-        },
-        {
-          value: "whoami",
-          label: "👤  Who Am I",
-          hint: "Show auth, default agent, tracked abilities",
         },
         {
           value: "logout",
@@ -113,35 +164,32 @@ async function interactiveMenu(): Promise<void> {
     handleCancel(choice);
 
     switch (choice) {
-      case "init":
-        await initCommand();
-        break;
       case "deploy":
         await deployCommand();
         break;
-      case "chat":
-        await chatCommand();
-        break;
-      case "trigger":
-        await triggerCommand();
+      case "init":
+        await initCommand();
         break;
       case "list":
         await listCommand();
         break;
+      case "delete":
+        await deleteCommand();
+        break;
+      case "toggle":
+        await toggleCommand();
+        break;
+      case "assign":
+        await assignCommand();
+        break;
       case "agents":
         await agentsCommand();
         break;
-      case "status":
-        await statusCommand();
-        break;
-      case "config":
-        await configEditCommand();
+      case "chat":
+        await chatCommand();
         break;
       case "logs":
         await logsCommand();
-        break;
-      case "whoami":
-        await whoamiCommand();
         break;
       case "logout":
         await logoutCommand();
@@ -229,6 +277,37 @@ program
   });
 
 program
+  .command("delete [ability]")
+  .description("Delete a deployed ability")
+  .option("--mock", "Use mock API client")
+  .action(async (ability: string | undefined, opts: { mock?: boolean }) => {
+    await deleteCommand(ability, opts);
+  });
+
+program
+  .command("toggle [ability]")
+  .description("Enable or disable a deployed ability")
+  .option("--enable", "Enable the ability")
+  .option("--disable", "Disable the ability")
+  .option("--mock", "Use mock API client")
+  .action(
+    async (
+      ability: string | undefined,
+      opts: { mock?: boolean; enable?: boolean; disable?: boolean },
+    ) => {
+      await toggleCommand(ability, opts);
+    },
+  );
+
+program
+  .command("assign")
+  .description("Assign abilities to an agent")
+  .option("--mock", "Use mock API client")
+  .action(async (opts: { mock?: boolean }) => {
+    await assignCommand(opts);
+  });
+
+program
   .command("agents")
   .description("View your agents and set a default")
   .option("--mock", "Use mock API client")
@@ -266,16 +345,34 @@ program
     await whoamiCommand();
   });
 
+program
+  .command("validate [path]")
+  .description("Check an ability for errors before deploying")
+  .action(async (path?: string) => {
+    await validateCommand(path);
+  });
+
+program
+  .command("set-jwt [token]")
+  .description(
+    "Save a session token to enable management commands (list, delete, toggle, assign)",
+  )
+  .action(async (token?: string) => {
+    await setJwtCommand(token);
+  });
+
 // ── Entry point: menu if no args, subcommand otherwise ───────────
 
-if (process.argv.length <= 2) {
-  interactiveMenu().catch((err: unknown) => {
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  });
-} else {
-  program.parseAsync(process.argv).catch((err: unknown) => {
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  });
-}
+checkForUpdates().then(() => {
+  if (process.argv.length <= 2) {
+    interactiveMenu().catch((err: unknown) => {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    });
+  } else {
+    program.parseAsync(process.argv).catch((err: unknown) => {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    });
+  }
+});

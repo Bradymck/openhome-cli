@@ -19,6 +19,7 @@ export interface CliConfig {
   api_base_url?: string;
   default_personality_id?: string;
   api_key?: string;
+  jwt?: string;
   abilities?: TrackedAbility[];
 }
 
@@ -129,9 +130,18 @@ export function getTrackedAbilities(): TrackedAbility[] {
 export function saveApiKey(key: string): void {
   const saved = keychainSet(key);
   if (!saved) {
-    // Fallback: save in config file (less secure)
     const config = getConfig();
     config.api_key = key;
     saveConfig(config);
   }
+}
+
+export function getJwt(): string | null {
+  return getConfig().jwt ?? null;
+}
+
+export function saveJwt(jwt: string): void {
+  const config = getConfig();
+  config.jwt = jwt;
+  saveConfig(config);
 }

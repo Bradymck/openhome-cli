@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { validateAbility } from "../validation/validator.js";
 import { registerAbility } from "../config/store.js";
 import { success, error, warn, info, p, handleCancel } from "../ui/format.js";
+import { deployCommand } from "./deploy.js";
 
 type TemplateType =
   | "basic"
@@ -889,7 +890,18 @@ export async function initCommand(nameArg?: string): Promise<void> {
     warn(`${w.file ? `[${w.file}] ` : ""}${w.message}`);
   }
 
-  p.note(`cd abilities/${name}\nopenhome deploy`, "Next steps");
+  if (result.passed) {
+    const deployNow = await p.confirm({
+      message: "Deploy to OpenHome now?",
+      initialValue: true,
+    });
+    handleCancel(deployNow);
 
-  p.outro(`Ability "${name}" is ready!`);
+    if (deployNow) {
+      await deployCommand(targetDir);
+      return;
+    }
+  }
+
+  p.outro(`Ability "${name}" is ready! Run: openhome deploy`);
 }

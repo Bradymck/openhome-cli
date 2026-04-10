@@ -1,6 +1,6 @@
 {
   "name": "openhome-cli",
-  "version": "0.1.0",
+  "version": "0.1.22",
   "description": "CLI for managing OpenHome voice AI abilities",
   "type": "module",
   "bin": {
@@ -27,10 +27,15 @@
   "license": "MIT",
   "dependencies": {
     "@clack/prompts": "^1.1.0",
+    "@types/form-data": "^2.2.1",
     "archiver": "^7.0.1",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
+    "form-data": "^4.0.5",
     "ws": "^8.19.0"
+  },
+  "overrides": {
+    "glob": "^11.0.0"
   },
   "devDependencies": {
     "@types/archiver": "^6.0.3",

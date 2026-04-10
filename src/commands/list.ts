@@ -1,6 +1,7 @@
 import { ApiClient, NotImplementedError } from "../api/client.js";
+import { handleIfSessionExpired } from "./handle-session-expired.js";
 import { MockApiClient } from "../api/mock-client.js";
-import { getApiKey, getConfig } from "../config/store.js";
+import { getApiKey, getConfig, getJwt } from "../config/store.js";
 import { error, warn, info, table, p } from "../ui/format.js";
 import type { TableRow } from "../ui/format.js";
 import chalk from "chalk";
@@ -30,12 +31,19 @@ export async function listCommand(
   if (opts.mock) {
     client = new MockApiClient();
   } else {
-    const apiKey = getApiKey();
-    if (!apiKey) {
+    const apiKey = getApiKey() ?? "";
+    const jwt = getJwt() ?? undefined;
+    if (!apiKey && !jwt) {
       error("Not authenticated. Run: openhome login");
       process.exit(1);
     }
-    client = new ApiClient(apiKey, getConfig().api_base_url);
+    if (!jwt) {
+      error(
+        "This command requires a session token.\nGet it from app.openhome.com → DevTools → Application → Local Storage → token\nThen run: openhome set-jwt <token>",
+      );
+      process.exit(1);
+    }
+    client = new ApiClient(apiKey, getConfig().api_base_url, jwt);
   }
 
   const s = p.spinner();
@@ -70,6 +78,7 @@ export async function listCommand(
       p.outro("List endpoint not yet implemented.");
       return;
     }
+    if (await handleIfSessionExpired(err)) return;
     error(
       `Failed to list abilities: ${err instanceof Error ? err.message : String(err)}`,
     );

@@ -10,8 +10,14 @@ import { homedir } from "node:os";
 import { validateAbility } from "../validation/validator.js";
 import { createAbilityZip } from "../util/zip.js";
 import { ApiClient, NotImplementedError } from "../api/client.js";
+import { handleIfSessionExpired } from "./handle-session-expired.js";
 import { MockApiClient } from "../api/mock-client.js";
-import { getApiKey, getConfig, getTrackedAbilities } from "../config/store.js";
+import {
+  getApiKey,
+  getConfig,
+  getJwt,
+  getTrackedAbilities,
+} from "../config/store.js";
 import type {
   AbilityCategory,
   UploadAbilityMetadata,
@@ -24,6 +30,13 @@ interface AbilityConfig {
   category?: string;
   matching_hotwords?: string[];
   [key: string]: unknown;
+}
+
+function expandPath(p: string): string {
+  if (p.startsWith("~/") || p === "~") {
+    return join(homedir(), p.slice(2));
+  }
+  return resolve(p);
 }
 
 const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg"];
@@ -108,14 +121,141 @@ async function resolveAbilityDir(pathArg?: string): Promise<string> {
     },
   });
   handleCancel(pathInput);
-  return resolve((pathInput as string).trim());
+  return expandPath((pathInput as string).trim());
 }
 
 export async function deployCommand(
   pathArg?: string,
   opts: { dryRun?: boolean; mock?: boolean; personality?: string } = {},
 ): Promise<void> {
-  p.intro("🚀 Deploy ability");
+  p.intro("🚀 Upload Ability");
+
+  // Explicit zip file passed
+  if (pathArg && pathArg.endsWith(".zip") && existsSync(resolve(pathArg))) {
+    await deployZip(resolve(pathArg), opts);
+    return;
+  }
+
+  // No arg — ask whether they have a zip or a folder
+  if (!pathArg) {
+    const mode = await p.select({
+      message: "What do you want to upload?",
+      options: [
+        {
+          value: "zip",
+          label: "📦  Upload a zip file",
+          hint: "I already have a .zip ready",
+        },
+        {
+          value: "folder",
+          label: "📁  Upload from a folder",
+          hint: "Point me to an ability directory",
+        },
+      ],
+    });
+    handleCancel(mode);
+
+    if (mode === "zip") {
+      const home = homedir();
+      const scanDirs = [
+        process.cwd(),
+        join(home, "Desktop"),
+        join(home, "Downloads"),
+        join(home, "Documents"),
+      ];
+
+      const foundZips: { path: string; label: string }[] = [];
+      const seen = new Set<string>();
+
+      function scanForZips(dir: string, depth = 0): void {
+        if (!existsSync(dir)) return;
+        try {
+          const entries = readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const full = join(dir, entry.name);
+            if (
+              entry.isFile() &&
+              entry.name.endsWith(".zip") &&
+              !seen.has(full)
+            ) {
+              seen.add(full);
+              const shortDir = dir.startsWith(home)
+                ? `~${dir.slice(home.length)}`
+                : dir;
+              foundZips.push({
+                path: full,
+                label: `${entry.name}  (${shortDir})`,
+              });
+            } else if (
+              entry.isDirectory() &&
+              depth < 2 &&
+              !entry.name.startsWith(".")
+            ) {
+              scanForZips(full, depth + 1);
+            }
+          }
+        } catch {
+          // skip unreadable dirs
+        }
+      }
+
+      for (const dir of scanDirs) {
+        scanForZips(dir);
+      }
+
+      let zipPath: string;
+
+      if (foundZips.length > 0) {
+        const zipOptions = [
+          ...foundZips.map((z) => ({ value: z.path, label: z.label })),
+          {
+            value: "__custom__",
+            label: "Other...",
+            hint: "Enter a path manually",
+          },
+        ];
+        const selected = await p.select({
+          message: "Select your zip file",
+          options: zipOptions,
+        });
+        handleCancel(selected);
+
+        if (selected === "__custom__") {
+          const zipInput = await p.text({
+            message: "Path to your zip file",
+            placeholder: "~/path/to/ability.zip",
+            validate: (val) => {
+              if (!val || !val.trim()) return "Path is required";
+              if (!existsSync(expandPath(val.trim())))
+                return `File not found: ${val.trim()}`;
+              if (!val.trim().endsWith(".zip")) return "Must be a .zip file";
+            },
+          });
+          handleCancel(zipInput);
+          zipPath = expandPath((zipInput as string).trim());
+        } else {
+          zipPath = selected as string;
+        }
+      } else {
+        const zipInput = await p.text({
+          message: "Path to your zip file",
+          placeholder: "~/Downloads/my-ability.zip",
+          validate: (val) => {
+            if (!val || !val.trim()) return "Path is required";
+            if (!existsSync(expandPath(val.trim())))
+              return `File not found: ${val.trim()}`;
+            if (!val.trim().endsWith(".zip")) return "Must be a .zip file";
+          },
+        });
+        handleCancel(zipInput);
+        zipPath = expandPath((zipInput as string).trim());
+      }
+
+      await deployZip(zipPath, opts);
+      return;
+    }
+  }
+
   const targetDir = await resolveAbilityDir(pathArg);
 
   // Step 1: Validate
@@ -254,7 +394,7 @@ export async function deployCommand(
           placeholder: "./icon.png",
           validate: (val) => {
             if (!val || !val.trim()) return undefined;
-            const resolved = resolve(val.trim());
+            const resolved = expandPath(val.trim());
             if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
             if (!IMAGE_EXTS.has(extname(resolved).toLowerCase()))
               return "Image must be PNG or JPG";
@@ -262,7 +402,7 @@ export async function deployCommand(
         });
         handleCancel(imgInput);
         const trimmed = (imgInput as string).trim();
-        if (trimmed) imagePath = resolve(trimmed);
+        if (trimmed) imagePath = expandPath(trimmed);
       } else if (selected !== "__skip__") {
         imagePath = selected as string;
       }
@@ -273,7 +413,7 @@ export async function deployCommand(
         placeholder: "./icon.png",
         validate: (val) => {
           if (!val || !val.trim()) return undefined;
-          const resolved = resolve(val.trim());
+          const resolved = expandPath(val.trim());
           if (!existsSync(resolved)) return `File not found: ${val.trim()}`;
           if (!IMAGE_EXTS.has(extname(resolved).toLowerCase()))
             return "Image must be PNG or JPG";
@@ -281,7 +421,7 @@ export async function deployCommand(
       });
       handleCancel(imgInput);
       const trimmed = (imgInput as string).trim();
-      if (trimmed) imagePath = resolve(trimmed);
+      if (trimmed) imagePath = expandPath(trimmed);
     }
   }
 
@@ -352,8 +492,9 @@ export async function deployCommand(
     return;
   }
 
-  const apiKey = getApiKey();
-  if (!apiKey) {
+  const apiKey = getApiKey() ?? "";
+  const jwt = getJwt() ?? undefined;
+  if (!apiKey && !jwt) {
     error("Not authenticated. Run: openhome login");
     process.exit(1);
   }
@@ -371,7 +512,7 @@ export async function deployCommand(
 
   s.start("Uploading ability...");
   try {
-    const client = new ApiClient(apiKey, getConfig().api_base_url);
+    const client = new ApiClient(apiKey, getConfig().api_base_url, jwt);
     const result = await client.uploadAbility(
       zipBuffer,
       imageBuffer,
@@ -416,6 +557,152 @@ export async function deployCommand(
       return;
     }
 
+    if (await handleIfSessionExpired(err)) return;
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.toLowerCase().includes("same name")) {
+      error(`An ability named "${uniqueName}" already exists.`);
+      warn(
+        `To update it, delete it first with: openhome delete\nOr rename it in config.json and redeploy.`,
+      );
+    } else {
+      error(`Deploy failed: ${msg}`);
+    }
+    process.exit(1);
+  }
+}
+
+async function deployZip(
+  zipPath: string,
+  opts: { dryRun?: boolean; mock?: boolean; personality?: string } = {},
+): Promise<void> {
+  const s = p.spinner();
+  const zipName = basename(zipPath, ".zip");
+
+  // Prompt for required metadata
+  const nameInput = await p.text({
+    message: "Ability name (unique, lowercase, hyphens only)",
+    placeholder: zipName.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
+    validate: (val) => {
+      if (!val || !val.trim()) return "Name is required";
+      if (!/^[a-z0-9-]+$/.test(val.trim()))
+        return "Lowercase letters, numbers, and hyphens only";
+    },
+  });
+  handleCancel(nameInput);
+
+  const descInput = await p.text({
+    message: "Description",
+    placeholder: "What does this ability do?",
+    validate: (val) => {
+      if (!val || !val.trim()) return "Description is required";
+    },
+  });
+  handleCancel(descInput);
+
+  const catChoice = await p.select({
+    message: "Category",
+    options: [
+      { value: "skill", label: "Skill", hint: "User-triggered" },
+      { value: "brain", label: "Brain Skill", hint: "Auto-triggered" },
+      {
+        value: "daemon",
+        label: "Background Daemon",
+        hint: "Runs continuously",
+      },
+    ],
+  });
+  handleCancel(catChoice);
+
+  const hotwordsInput = await p.text({
+    message: "Trigger words (comma-separated)",
+    placeholder: "hey openhome, start ability",
+    validate: (val) => {
+      if (!val || !val.trim()) return "At least one trigger word is required";
+    },
+  });
+  handleCancel(hotwordsInput);
+
+  const name = (nameInput as string).trim();
+  const description = (descInput as string).trim();
+  const category = catChoice as AbilityCategory;
+  const hotwords = (hotwordsInput as string)
+    .split(",")
+    .map((w) => w.trim())
+    .filter(Boolean);
+
+  const personalityId = opts.personality ?? getConfig().default_personality_id;
+
+  const metadata: UploadAbilityMetadata = {
+    name,
+    description,
+    category,
+    matching_hotwords: hotwords,
+    personality_id: personalityId,
+  };
+
+  const zipBuffer = readFileSync(zipPath);
+
+  if (opts.dryRun) {
+    p.note(
+      [
+        `Zip:         ${zipPath}`,
+        `Name:        ${name}`,
+        `Description: ${description}`,
+        `Category:    ${category}`,
+        `Hotwords:    ${hotwords.join(", ")}`,
+        `Agent:       ${personalityId ?? "(none set)"}`,
+      ].join("\n"),
+      "Dry Run — would deploy",
+    );
+    p.outro("No changes made.");
+    return;
+  }
+
+  const confirmed = await p.confirm({
+    message: `Deploy "${name}" to OpenHome?`,
+  });
+  handleCancel(confirmed);
+  if (!confirmed) {
+    p.cancel("Aborted.");
+    return;
+  }
+
+  if (opts.mock) {
+    s.start("Uploading (mock)...");
+    const mockClient = new MockApiClient();
+    await mockClient.uploadAbility(zipBuffer, null, null, metadata);
+    s.stop("Mock upload complete.");
+    p.outro("Mock deploy complete.");
+    return;
+  }
+
+  const apiKey = getApiKey() ?? "";
+  const jwt = getJwt() ?? undefined;
+  if (!apiKey && !jwt) {
+    error("Not authenticated. Run: openhome login");
+    process.exit(1);
+  }
+
+  s.start("Uploading ability...");
+  try {
+    const client = new ApiClient(apiKey, getConfig().api_base_url, jwt);
+    const result = await client.uploadAbility(zipBuffer, null, null, metadata);
+    s.stop("Upload complete.");
+    p.note(
+      [
+        `Ability ID: ${result.ability_id}`,
+        `Version:    ${result.version}`,
+        `Status:     ${result.status}`,
+        result.message ? `Message:    ${result.message}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      "Deploy Result",
+    );
+    p.outro("Deployed successfully! 🎉");
+  } catch (err) {
+    s.stop("Upload failed.");
+    if (await handleIfSessionExpired(err)) return;
     error(`Deploy failed: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }

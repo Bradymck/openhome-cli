@@ -3,7 +3,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { ApiClient, NotImplementedError } from "../api/client.js";
 import { MockApiClient } from "../api/mock-client.js";
-import { getApiKey, getConfig, getTrackedAbilities } from "../config/store.js";
+import {
+  getApiKey,
+  getConfig,
+  getJwt,
+  getTrackedAbilities,
+} from "../config/store.js";
 import { error, warn, info, p, handleCancel } from "../ui/format.js";
 import chalk from "chalk";
 
@@ -105,12 +110,13 @@ export async function statusCommand(
   if (opts.mock) {
     client = new MockApiClient();
   } else {
-    const apiKey = getApiKey();
-    if (!apiKey) {
+    const apiKey = getApiKey() ?? "";
+    const jwt = getJwt() ?? undefined;
+    if (!apiKey && !jwt) {
       error("Not authenticated. Run: openhome login");
       process.exit(1);
     }
-    client = new ApiClient(apiKey, getConfig().api_base_url);
+    client = new ApiClient(apiKey, getConfig().api_base_url, jwt);
   }
 
   const s = p.spinner();
