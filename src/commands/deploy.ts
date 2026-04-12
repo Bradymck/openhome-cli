@@ -49,7 +49,14 @@ function scanForZips(
 
 export async function deployCommand(
   pathArg?: string,
-  opts: { mock?: boolean; personality?: string } = {},
+  opts: {
+    mock?: boolean;
+    personality?: string;
+    name?: string;
+    description?: string;
+    category?: string;
+    triggers?: string;
+  } = {},
 ): Promise<void> {
   p.intro("🚀 Upload Ability");
 
@@ -122,59 +129,88 @@ export async function deployCommand(
     }
   }
 
-  // Metadata prompts
+  // Metadata — use flags if provided, otherwise prompt
   const zipName = basename(zipPath, ".zip");
+  const defaultName = zipName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
-  const nameInput = await p.text({
-    message: "Ability name",
-    placeholder: zipName.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
-    validate: (val) => {
-      if (!val?.trim()) return "Name is required";
-      if (!/^[a-z0-9-]+$/.test(val.trim()))
-        return "Lowercase letters, numbers, hyphens only";
-    },
-  });
-  handleCancel(nameInput);
-
-  const descInput = await p.text({
-    message: "Description",
-    placeholder: "What does this ability do?",
-    validate: (val) => {
-      if (!val?.trim()) return "Description is required";
-    },
-  });
-  handleCancel(descInput);
-
-  const catChoice = await p.select({
-    message: "Category",
-    options: [
-      { value: "skill", label: "Skill", hint: "User-triggered" },
-      { value: "brain", label: "Brain Skill", hint: "Auto-triggered" },
-      {
-        value: "daemon",
-        label: "Background Daemon",
-        hint: "Runs continuously",
+  let name: string;
+  if (opts.name) {
+    name = opts.name.trim();
+  } else {
+    const nameInput = await p.text({
+      message: "Ability name",
+      placeholder: defaultName,
+      validate: (val) => {
+        if (!val?.trim()) return "Name is required";
+        if (!/^[a-z0-9-]+$/.test(val.trim()))
+          return "Lowercase letters, numbers, hyphens only";
       },
-    ],
-  });
-  handleCancel(catChoice);
+    });
+    handleCancel(nameInput);
+    name = (nameInput as string).trim() || defaultName;
+  }
 
-  const hotwordsInput = await p.text({
-    message: "Trigger words (comma-separated)",
-    placeholder: "hey openhome, activate skill",
-    validate: (val) => {
-      if (!val?.trim()) return "At least one trigger word is required";
-    },
-  });
-  handleCancel(hotwordsInput);
+  let description: string;
+  if (opts.description) {
+    description = opts.description.trim();
+  } else {
+    const descInput = await p.text({
+      message: "Description",
+      placeholder: "What does this ability do?",
+      validate: (val) => {
+        if (!val?.trim()) return "Description is required";
+      },
+    });
+    handleCancel(descInput);
+    description = (descInput as string).trim();
+  }
 
-  const name = (nameInput as string).trim();
-  const description = (descInput as string).trim();
-  const category = catChoice as AbilityCategory;
-  const hotwords = (hotwordsInput as string)
-    .split(",")
-    .map((w) => w.trim())
-    .filter(Boolean);
+  let category: AbilityCategory;
+  if (
+    opts.category &&
+    ["skill", "brain_skill", "background_daemon", "local"].includes(
+      opts.category,
+    )
+  ) {
+    category = opts.category as AbilityCategory;
+  } else {
+    const catChoice = await p.select({
+      message: "Category",
+      options: [
+        { value: "skill", label: "Skill", hint: "User-triggered" },
+        { value: "brain_skill", label: "Brain Skill", hint: "Auto-triggered" },
+        { value: "local", label: "Local", hint: "Runs on local device only" },
+        {
+          value: "background_daemon",
+          label: "Background Daemon",
+          hint: "Runs continuously",
+        },
+      ],
+    });
+    handleCancel(catChoice);
+    category = catChoice as AbilityCategory;
+  }
+
+  let hotwords: string[];
+  if (opts.triggers) {
+    hotwords = opts.triggers
+      .split(",")
+      .map((w) => w.trim())
+      .filter(Boolean);
+  } else {
+    const hotwordsInput = await p.text({
+      message: "Trigger words (comma-separated)",
+      placeholder: "hey openhome, activate skill",
+      validate: (val) => {
+        if (!val?.trim()) return "At least one trigger word is required";
+      },
+    });
+    handleCancel(hotwordsInput);
+    hotwords = (hotwordsInput as string)
+      .split(",")
+      .map((w) => w.trim())
+      .filter(Boolean);
+  }
   const personalityId = opts.personality ?? getConfig().default_personality_id;
 
   const metadata: UploadAbilityMetadata = {

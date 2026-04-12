@@ -17,7 +17,11 @@ export interface GetPersonalitiesResponse {
 }
 
 // Upload request metadata
-export type AbilityCategory = "skill" | "brain" | "daemon";
+export type AbilityCategory =
+  | "skill"
+  | "brain_skill"
+  | "background_daemon"
+  | "local";
 
 export interface UploadAbilityMetadata {
   name: string;

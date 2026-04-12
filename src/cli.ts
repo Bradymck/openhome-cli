@@ -224,12 +224,23 @@ program
 program
   .command("deploy [path]")
   .description("Upload an ability zip to OpenHome")
-  .option("--mock", "Use mock API client (no real network calls)")
+  .option("--name <name>", "Ability name (skips prompt)")
+  .option("--description <desc>", "Description (skips prompt)")
+  .option("--category <cat>", "Category: skill | brain | daemon (skips prompt)")
+  .option("--triggers <words>", "Comma-separated trigger words (skips prompt)")
   .option("--personality <id>", "Agent ID to attach the ability to")
+  .option("--mock", "Use mock API client (no real network calls)")
   .action(
     async (
       path: string | undefined,
-      opts: { mock?: boolean; personality?: string },
+      opts: {
+        mock?: boolean;
+        personality?: string;
+        name?: string;
+        description?: string;
+        category?: string;
+        triggers?: string;
+      },
     ) => {
       await deployCommand(path, opts);
     },
