@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 
 import { loginCommand } from "./commands/login.js";
-import { initCommand } from "./commands/init.js";
 import { deployCommand } from "./commands/deploy.js";
 import { deleteCommand } from "./commands/delete.js";
 import { toggleCommand } from "./commands/toggle.js";
@@ -19,7 +18,6 @@ import { whoamiCommand } from "./commands/whoami.js";
 import { configEditCommand } from "./commands/config-edit.js";
 import { logsCommand } from "./commands/logs.js";
 import { setJwtCommand } from "./commands/set-jwt.js";
-import { validateCommand } from "./commands/validate.js";
 import { p, handleCancel } from "./ui/format.js";
 
 // Read version from package.json
@@ -114,11 +112,6 @@ async function interactiveMenu(): Promise<void> {
           hint: "Upload a zip file to OpenHome",
         },
         {
-          value: "init",
-          label: "✨  Scaffold Ability",
-          hint: "Generate a new ability from a template",
-        },
-        {
           value: "list",
           label: "📋  My Abilities",
           hint: "List deployed abilities",
@@ -166,9 +159,6 @@ async function interactiveMenu(): Promise<void> {
     switch (choice) {
       case "deploy":
         await deployCommand();
-        break;
-      case "init":
-        await initCommand();
         break;
       case "list":
         await listCommand();
@@ -232,22 +222,14 @@ program
   });
 
 program
-  .command("init [name]")
-  .description("Scaffold a new ability from templates")
-  .action(async (name?: string) => {
-    await initCommand(name);
-  });
-
-program
   .command("deploy [path]")
-  .description("Validate and deploy an ability to OpenHome")
-  .option("--dry-run", "Show what would be deployed without sending")
+  .description("Upload an ability zip to OpenHome")
   .option("--mock", "Use mock API client (no real network calls)")
   .option("--personality <id>", "Agent ID to attach the ability to")
   .action(
     async (
       path: string | undefined,
-      opts: { dryRun?: boolean; mock?: boolean; personality?: string },
+      opts: { mock?: boolean; personality?: string },
     ) => {
       await deployCommand(path, opts);
     },
@@ -343,13 +325,6 @@ program
   .description("Show auth status, default agent, and tracked abilities")
   .action(async () => {
     await whoamiCommand();
-  });
-
-program
-  .command("validate [path]")
-  .description("Check an ability for errors before deploying")
-  .action(async (path?: string) => {
-    await validateCommand(path);
   });
 
 program
