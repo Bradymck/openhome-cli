@@ -185,7 +185,25 @@ export async function deployCommand(
     personality_id: personalityId,
   };
 
-  const zipBuffer = readFileSync(zipPath);
+  let zipBuffer: Buffer;
+  try {
+    zipBuffer = readFileSync(zipPath);
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EPERM" || code === "EACCES") {
+      error(
+        `Permission denied: macOS is blocking access to this file.\n` +
+          `  Fix: System Settings → Privacy & Security → Full Disk Access → enable your terminal\n` +
+          `  Or move the zip somewhere accessible first:\n` +
+          `  cp "${zipPath}" /tmp/${basename(zipPath)} && openhome deploy /tmp/${basename(zipPath)}`,
+      );
+    } else {
+      error(
+        `Could not read zip file: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    process.exit(1);
+  }
 
   if (opts.mock) {
     const s = p.spinner();
