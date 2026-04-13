@@ -25,6 +25,8 @@ export interface CliConfig {
   api_key?: string;
   jwt?: string;
   abilities?: TrackedAbility[];
+  last_version_check?: number;
+  latest_version_cache?: string;
 }
 
 const CONFIG_DIR = join(homedir(), ".openhome");
