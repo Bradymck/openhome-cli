@@ -3,8 +3,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { ApiClient, NotImplementedError } from "../api/client.js";
 import { MockApiClient } from "../api/mock-client.js";
-import { getApiKey, getConfig, getTrackedAbilities } from "../config/store.js";
-import { error, warn, info, p, handleCancel } from "../ui/format.js";
+import {
+  getApiKey,
+  getApiBase,
+  getJwt,
+  getTrackedAbilities,
+} from "../config/store.js";
+import {
+  error,
+  info,
+  p,
+  handleCancel,
+  jsonOut,
+  jsonError,
+} from "../ui/format.js";
 import chalk from "chalk";
 
 function statusBadge(status: string): string {
@@ -22,7 +34,6 @@ function statusBadge(status: string): string {
   }
 }
 
-/** Read unique_name from a config.json in a directory. */
 function readAbilityName(dir: string): string | null {
   const configPath = join(dir, "config.json");
   if (!existsSync(configPath)) return null;
@@ -36,19 +47,16 @@ function readAbilityName(dir: string): string | null {
   }
 }
 
-/** Resolve ability name: check cwd, then pick from tracked abilities. */
 async function resolveAbilityName(): Promise<string | undefined> {
-  // Check current directory first
   const cwdName = readAbilityName(resolve("."));
   if (cwdName) {
     info(`Detected ability: ${cwdName}`);
     return cwdName;
   }
 
-  // Build list from tracked abilities
   const tracked = getTrackedAbilities();
-  const options: { value: string; label: string; hint?: string }[] = [];
   const home = homedir();
+  const options: { value: string; label: string; hint?: string }[] = [];
 
   for (const a of tracked) {
     const name = readAbilityName(a.path);
@@ -82,45 +90,60 @@ async function resolveAbilityName(): Promise<string | undefined> {
 
 export async function statusCommand(
   abilityArg?: string,
-  opts: { mock?: boolean } = {},
+  opts: { mock?: boolean; json?: boolean } = {},
 ): Promise<void> {
   let abilityId = abilityArg;
 
-  // If no arg, try to resolve from cwd or tracked abilities
   if (!abilityId) {
     abilityId = await resolveAbilityName();
   }
 
   if (!abilityId) {
+    if (opts.json)
+      jsonError(
+        "NO_ABILITY",
+        "No ability found. Pass a name or run from an ability directory.",
+      );
     error(
       "No ability found. Pass a name, run from an ability directory, or create one with: openhome init",
     );
     process.exit(1);
   }
 
-  p.intro(`🔍 Status: ${abilityId}`);
+  if (!opts.json) p.intro(`🔍 Status: ${abilityId}`);
 
   let client: ApiClient | MockApiClient;
 
   if (opts.mock) {
     client = new MockApiClient();
   } else {
-    const apiKey = getApiKey();
-    if (!apiKey) {
+    const apiKey = getApiKey() ?? "";
+    const jwt = getJwt() ?? undefined;
+    if (!apiKey && !jwt) {
+      if (opts.json)
+        jsonError(
+          "UNAUTHENTICATED",
+          "Not authenticated. Set OPENHOME_API_KEY and OPENHOME_JWT env vars.",
+          2,
+        );
       error("Not authenticated. Run: openhome login");
       process.exit(1);
     }
-    client = new ApiClient(apiKey, getConfig().api_base_url);
+    client = new ApiClient(apiKey, getApiBase(), jwt);
   }
 
-  const s = p.spinner();
-  s.start("Fetching status...");
+  const s = opts.json ? null : p.spinner();
+  s?.start("Fetching status...");
 
   try {
     const ability = await client.getAbility(abilityId);
-    s.stop("Status loaded.");
+    s?.stop("Status loaded.");
 
-    // Main info
+    if (opts.json) {
+      jsonOut({ ok: true, ability });
+      return;
+    }
+
     p.note(
       [
         `Name:       ${ability.unique_name}`,
@@ -138,7 +161,6 @@ export async function statusCommand(
       "Ability Details",
     );
 
-    // Validation errors
     if (ability.validation_errors.length > 0) {
       p.note(
         ability.validation_errors.map((e) => chalk.red(`✗ ${e}`)).join("\n"),
@@ -146,29 +168,29 @@ export async function statusCommand(
       );
     }
 
-    // Deploy history
     if (ability.deploy_history.length > 0) {
       const historyLines = ability.deploy_history.map((event) => {
         const icon =
           event.status === "success" ? chalk.green("✓") : chalk.red("✗");
         return `${icon}  v${event.version}  ${event.message}  ${chalk.gray(new Date(event.timestamp).toLocaleString())}`;
       });
-
       p.note(historyLines.join("\n"), "Deploy History");
     }
 
     p.outro("Done.");
   } catch (err) {
-    s.stop("Failed.");
+    s?.stop("Failed.");
 
     if (err instanceof NotImplementedError) {
+      if (opts.json)
+        jsonError("NOT_IMPLEMENTED", "Status endpoint not yet implemented.");
       p.note("Use --mock to see example output.", "API Not Available Yet");
       p.outro("Status endpoint not yet implemented.");
       return;
     }
-    error(
-      `Failed to get status: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    const msg = `Failed to get status: ${err instanceof Error ? err.message : String(err)}`;
+    if (opts.json) jsonError("ERROR", msg);
+    error(msg);
     process.exit(1);
   }
 }

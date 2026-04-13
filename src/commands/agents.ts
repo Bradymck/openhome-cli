@@ -1,13 +1,26 @@
 import { ApiClient, NotImplementedError } from "../api/client.js";
 import { MockApiClient } from "../api/mock-client.js";
-import { getApiKey, getConfig, saveConfig } from "../config/store.js";
-import { error, success, info, p, handleCancel } from "../ui/format.js";
+import {
+  getApiKey,
+  getApiBase,
+  getConfig,
+  saveConfig,
+} from "../config/store.js";
+import {
+  error,
+  success,
+  info,
+  p,
+  handleCancel,
+  jsonOut,
+  jsonError,
+} from "../ui/format.js";
 import chalk from "chalk";
 
 export async function agentsCommand(
-  opts: { mock?: boolean } = {},
+  opts: { mock?: boolean; json?: boolean } = {},
 ): Promise<void> {
-  p.intro("🤖 Your Agents");
+  if (!opts.json) p.intro("🤖 Your Agents");
 
   let client: ApiClient | MockApiClient;
 
@@ -16,18 +29,38 @@ export async function agentsCommand(
   } else {
     const apiKey = getApiKey();
     if (!apiKey) {
+      if (opts.json)
+        jsonError(
+          "UNAUTHENTICATED",
+          "Not authenticated. Set OPENHOME_API_KEY env var.",
+          2,
+        );
       error("Not authenticated. Run: openhome login");
       process.exit(1);
     }
-    client = new ApiClient(apiKey, getConfig().api_base_url);
+    client = new ApiClient(apiKey, getApiBase());
   }
 
-  const s = p.spinner();
-  s.start("Fetching agents...");
+  const s = opts.json ? null : p.spinner();
+  s?.start("Fetching agents...");
 
   try {
     const personalities = await client.getPersonalities();
-    s.stop(`Found ${personalities.length} agent(s).`);
+    s?.stop(`Found ${personalities.length} agent(s).`);
+
+    if (opts.json) {
+      const config = getConfig();
+      jsonOut({
+        ok: true,
+        agents: personalities.map((ag) => ({
+          id: String(ag.id),
+          name: ag.name,
+        })),
+        default_agent_id: config.default_personality_id ?? null,
+        count: personalities.length,
+      });
+      return;
+    }
 
     if (personalities.length === 0) {
       info("No agents found. Create one at https://app.openhome.com");
@@ -37,17 +70,22 @@ export async function agentsCommand(
 
     p.note(
       personalities
-        .map((pers) => `${chalk.bold(pers.name)}  ${chalk.gray(pers.id)}`)
+        .map((ag) => `${chalk.bold(ag.name)}  ${chalk.gray(ag.id)}`)
         .join("\n"),
       "Agents",
     );
 
     const config = getConfig();
     const currentDefault = config.default_personality_id;
-
     if (currentDefault) {
-      const match = personalities.find((p) => p.id === currentDefault);
+      const match = personalities.find((ag) => ag.id === currentDefault);
       info(`Default agent: ${match ? match.name : currentDefault}`);
+    }
+
+    // Skip interactive prompt if no TTY
+    if (!process.stdout.isTTY) {
+      p.outro("Done.");
+      return;
     }
 
     const setDefault = await p.confirm({
@@ -58,14 +96,13 @@ export async function agentsCommand(
     if (setDefault) {
       const selected = await p.select({
         message: "Choose default agent",
-        options: personalities.map((pers) => ({
-          value: pers.id,
-          label: pers.name,
-          hint: pers.id,
+        options: personalities.map((ag) => ({
+          value: ag.id,
+          label: ag.name,
+          hint: String(ag.id),
         })),
       });
       handleCancel(selected);
-
       config.default_personality_id = selected as string;
       saveConfig(config);
       success(`Default agent set: ${String(selected)}`);
@@ -73,16 +110,18 @@ export async function agentsCommand(
 
     p.outro("Done.");
   } catch (err) {
-    s.stop("Failed.");
+    s?.stop("Failed.");
 
     if (err instanceof NotImplementedError) {
+      if (opts.json)
+        jsonError("NOT_IMPLEMENTED", "Agents endpoint not yet implemented.");
       p.note("Use --mock to see example output.", "API Not Available Yet");
       p.outro("Agents endpoint not yet implemented.");
       return;
     }
-    error(
-      `Failed to fetch agents: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    const msg = `Failed to fetch agents: ${err instanceof Error ? err.message : String(err)}`;
+    if (opts.json) jsonError("ERROR", msg);
+    error(msg);
     process.exit(1);
   }
 }

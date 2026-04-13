@@ -4,6 +4,10 @@ import type {
   UploadAbilityMetadata,
   ListAbilitiesResponse,
   GetAbilityResponse,
+  VerifyApiKeyResponse,
+  DeleteCapabilityResponse,
+  ToggleCapabilityResponse,
+  AssignCapabilitiesResponse,
 } from "./contracts.js";
 import type { IApiClient } from "./client.js";
 
@@ -70,6 +74,38 @@ export class MockApiClient implements IApiClient {
 
   async listAbilities(): Promise<ListAbilitiesResponse> {
     return Promise.resolve({ abilities: MOCK_ABILITIES });
+  }
+
+  async verifyApiKey(_apiKey: string): Promise<VerifyApiKeyResponse> {
+    return Promise.resolve({
+      valid: true,
+      message: "[MOCK] API key is valid.",
+    });
+  }
+
+  async deleteCapability(id: string): Promise<DeleteCapabilityResponse> {
+    return Promise.resolve({
+      message: `[MOCK] Capability ${id} deleted successfully.`,
+    });
+  }
+
+  async toggleCapability(
+    id: string,
+    enabled: boolean,
+  ): Promise<ToggleCapabilityResponse> {
+    return Promise.resolve({
+      enabled,
+      message: `[MOCK] Capability ${id} ${enabled ? "enabled" : "disabled"}.`,
+    });
+  }
+
+  async assignCapabilities(
+    personalityId: string,
+    capabilityIds: number[],
+  ): Promise<AssignCapabilitiesResponse> {
+    return Promise.resolve({
+      message: `[MOCK] Agent ${personalityId} updated with ${capabilityIds.length} capability(s).`,
+    });
   }
 
   async getAbility(id: string): Promise<GetAbilityResponse> {

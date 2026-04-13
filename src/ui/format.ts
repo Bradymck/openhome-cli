@@ -93,3 +93,18 @@ export function handleCancel(value: unknown): void {
     process.exit(0);
   }
 }
+
+/** Emit machine-readable JSON to stdout. Always use before process.exit() in --json mode. */
+export function jsonOut(data: Record<string, unknown>): void {
+  console.log(JSON.stringify(data));
+}
+
+/** Emit a JSON error and exit. */
+export function jsonError(
+  code: string,
+  message: string,
+  exitCode: 1 | 2 | 3 = 1,
+): never {
+  jsonOut({ ok: false, error: { code, message } });
+  process.exit(exitCode);
+}

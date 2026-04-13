@@ -4,8 +4,10 @@ import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 
 import { loginCommand } from "./commands/login.js";
-import { initCommand } from "./commands/init.js";
 import { deployCommand } from "./commands/deploy.js";
+import { deleteCommand } from "./commands/delete.js";
+import { toggleCommand } from "./commands/toggle.js";
+import { assignCommand } from "./commands/assign.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
 import { agentsCommand } from "./commands/agents.js";
@@ -15,6 +17,7 @@ import { triggerCommand } from "./commands/trigger.js";
 import { whoamiCommand } from "./commands/whoami.js";
 import { configEditCommand } from "./commands/config-edit.js";
 import { logsCommand } from "./commands/logs.js";
+import { setJwtCommand } from "./commands/set-jwt.js";
 import { p, handleCancel } from "./ui/format.js";
 
 // Read version from package.json
@@ -28,6 +31,60 @@ try {
   version = pkg.version ?? version;
 } catch {
   // fallback to default
+}
+
+// ── Auto-update check ────────────────────────────────────────────
+async function checkForUpdates(): Promise<void> {
+  // Skip if disabled, re-execing, or in JSON mode (would corrupt piped output)
+  if (process.env.OPENHOME_NO_UPDATE === "1") return;
+  if (process.argv.includes("--json")) return;
+
+  try {
+    const res = await fetch("https://registry.npmjs.org/openhome-cli/latest", {
+      signal: AbortSignal.timeout(2000),
+    });
+    const data = (await res.json()) as { version?: string };
+    const latest = data.version;
+    // Validate semver format before using — guards against poisoned registry responses
+    if (!latest || latest === version) return;
+    if (!/^\d+\.\d+\.\d+$/.test(latest)) return;
+
+    // Only act if npm version is strictly newer
+    const toNum = (v: string) =>
+      v
+        .split(".")
+        .map(Number)
+        .reduce((a, n) => a * 1000 + n, 0);
+    if (toNum(latest) <= toNum(version)) return;
+
+    // Detect npx: argv[1] contains _npx or npm_execpath points to npx
+    const arg1 = process.argv[1] ?? "";
+    const isNpx =
+      arg1.includes("_npx") ||
+      arg1.includes(".npm/") ||
+      (process.env.npm_execpath ?? "").includes("npx");
+
+    if (isNpx) {
+      // Re-exec with latest — user gets the new version transparently
+      const { execFileSync } = await import("node:child_process");
+      execFileSync(
+        "npx",
+        [`openhome-cli@${latest}`, ...process.argv.slice(2)],
+        { stdio: "inherit", env: { ...process.env, OPENHOME_NO_UPDATE: "1" } },
+      );
+      process.exit(0);
+    } else {
+      // Global install — show one-line notice, don't block
+      const { default: chalk } = await import("chalk");
+      console.log(
+        chalk.yellow(
+          `  Update available: v${version} → v${latest}   Run: npm install -g openhome-cli@latest\n`,
+        ),
+      );
+    }
+  } catch {
+    // Network timeout or error — continue silently
+  }
 }
 
 // ── Interactive menu (bare `openhome` with no args) ──────────────
@@ -53,24 +110,9 @@ async function interactiveMenu(): Promise<void> {
       message: "What would you like to do?",
       options: [
         {
-          value: "init",
-          label: "✨  Create Ability",
-          hint: "Scaffold a new ability from templates",
-        },
-        {
           value: "deploy",
-          label: "🚀  Deploy",
-          hint: "Upload ability to OpenHome",
-        },
-        {
-          value: "chat",
-          label: "💬  Chat",
-          hint: "Talk to your agent",
-        },
-        {
-          value: "trigger",
-          label: "⚡  Trigger",
-          hint: "Fire an ability remotely with a phrase",
+          label: "⬆️   Upload Ability",
+          hint: "Upload a zip file to OpenHome",
         },
         {
           value: "list",
@@ -78,29 +120,34 @@ async function interactiveMenu(): Promise<void> {
           hint: "List deployed abilities",
         },
         {
+          value: "delete",
+          label: "🗑️   Delete Ability",
+          hint: "Remove a deployed ability",
+        },
+        {
+          value: "toggle",
+          label: "⚡  Enable / Disable",
+          hint: "Toggle an ability on or off",
+        },
+        {
+          value: "assign",
+          label: "🔗  Assign to Agent",
+          hint: "Link abilities to an agent",
+        },
+        {
           value: "agents",
           label: "🤖  My Agents",
           hint: "View agents and set default",
         },
         {
-          value: "status",
-          label: "🔍  Status",
-          hint: "Check ability status",
-        },
-        {
-          value: "config",
-          label: "⚙️   Edit Config",
-          hint: "Update trigger words, description, category",
+          value: "chat",
+          label: "💬  Chat",
+          hint: "Talk to your agent",
         },
         {
           value: "logs",
           label: "📡  Logs",
           hint: "Stream live agent messages",
-        },
-        {
-          value: "whoami",
-          label: "👤  Who Am I",
-          hint: "Show auth, default agent, tracked abilities",
         },
         {
           value: "logout",
@@ -113,35 +160,29 @@ async function interactiveMenu(): Promise<void> {
     handleCancel(choice);
 
     switch (choice) {
-      case "init":
-        await initCommand();
-        break;
       case "deploy":
         await deployCommand();
-        break;
-      case "chat":
-        await chatCommand();
-        break;
-      case "trigger":
-        await triggerCommand();
         break;
       case "list":
         await listCommand();
         break;
+      case "delete":
+        await deleteCommand();
+        break;
+      case "toggle":
+        await toggleCommand();
+        break;
+      case "assign":
+        await assignCommand();
+        break;
       case "agents":
         await agentsCommand();
         break;
-      case "status":
-        await statusCommand();
-        break;
-      case "config":
-        await configEditCommand();
+      case "chat":
+        await chatCommand();
         break;
       case "logs":
         await logsCommand();
-        break;
-      case "whoami":
-        await whoamiCommand();
         break;
       case "logout":
         await logoutCommand();
@@ -172,8 +213,10 @@ program
 program
   .command("login")
   .description("Authenticate with your OpenHome API key")
-  .action(async () => {
-    await loginCommand();
+  .option("--key <api_key>", "API key (skips prompts)")
+  .option("--jwt <token>", "Session token (skips browser step)")
+  .action(async (opts: { key?: string; jwt?: string }) => {
+    await loginCommand(opts);
   });
 
 program
@@ -184,22 +227,36 @@ program
   });
 
 program
-  .command("init [name]")
-  .description("Scaffold a new ability from templates")
-  .action(async (name?: string) => {
-    await initCommand(name);
-  });
-
-program
   .command("deploy [path]")
-  .description("Validate and deploy an ability to OpenHome")
-  .option("--dry-run", "Show what would be deployed without sending")
-  .option("--mock", "Use mock API client (no real network calls)")
+  .description("Upload an ability zip to OpenHome")
+  .option("--name <name>", "Ability name (skips prompt)")
+  .option("--description <desc>", "Description (skips prompt)")
+  .option(
+    "--category <cat>",
+    "Category: skill | brain_skill | background_daemon | local",
+  )
+  .option("--triggers <words>", "Comma-separated trigger words (skips prompt)")
   .option("--personality <id>", "Agent ID to attach the ability to")
+  .option(
+    "--timeout <seconds>",
+    "Upload timeout in seconds (default: 120)",
+    "120",
+  )
+  .option("--json", "Output machine-readable JSON")
+  .option("--mock", "Use mock API client (no real network calls)")
   .action(
     async (
       path: string | undefined,
-      opts: { dryRun?: boolean; mock?: boolean; personality?: string },
+      opts: {
+        mock?: boolean;
+        personality?: string;
+        name?: string;
+        description?: string;
+        category?: string;
+        triggers?: string;
+        timeout?: string;
+        json?: boolean;
+      },
     ) => {
       await deployCommand(path, opts);
     },
@@ -223,26 +280,91 @@ program
 program
   .command("list")
   .description("List all deployed abilities")
+  .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client")
-  .action(async (opts: { mock?: boolean }) => {
+  .action(async (opts: { mock?: boolean; json?: boolean }) => {
     await listCommand(opts);
   });
 
 program
+  .command("delete [ability]")
+  .description("Delete a deployed ability")
+  .option("--yes", "Skip confirmation prompt")
+  .option("--json", "Output machine-readable JSON")
+  .option("--mock", "Use mock API client")
+  .action(
+    async (
+      ability: string | undefined,
+      opts: { mock?: boolean; yes?: boolean; json?: boolean },
+    ) => {
+      await deleteCommand(ability, opts);
+    },
+  );
+
+program
+  .command("toggle [ability]")
+  .description("Enable or disable a deployed ability")
+  .option("--enable", "Enable the ability")
+  .option("--disable", "Disable the ability")
+  .option("--json", "Output machine-readable JSON")
+  .option("--mock", "Use mock API client")
+  .action(
+    async (
+      ability: string | undefined,
+      opts: {
+        mock?: boolean;
+        enable?: boolean;
+        disable?: boolean;
+        json?: boolean;
+      },
+    ) => {
+      await toggleCommand(ability, opts);
+    },
+  );
+
+program
+  .command("assign")
+  .description("Assign abilities to an agent")
+  .option("--agent <id>", "Agent ID or name (skips prompt)")
+  .option(
+    "--capabilities <ids>",
+    "Comma-separated ability IDs or names (skips prompt)",
+  )
+  .option("--json", "Output machine-readable JSON")
+  .option("--mock", "Use mock API client")
+  .action(
+    async (opts: {
+      mock?: boolean;
+      agent?: string;
+      capabilities?: string;
+      json?: boolean;
+    }) => {
+      await assignCommand(opts);
+    },
+  );
+
+program
   .command("agents")
   .description("View your agents and set a default")
+  .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client")
-  .action(async (opts: { mock?: boolean }) => {
+  .action(async (opts: { mock?: boolean; json?: boolean }) => {
     await agentsCommand(opts);
   });
 
 program
   .command("status [ability]")
   .description("Show detailed status of an ability")
+  .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client")
-  .action(async (ability: string | undefined, opts: { mock?: boolean }) => {
-    await statusCommand(ability, opts);
-  });
+  .action(
+    async (
+      ability: string | undefined,
+      opts: { mock?: boolean; json?: boolean },
+    ) => {
+      await statusCommand(ability, opts);
+    },
+  );
 
 program
   .command("config [path]")
@@ -262,20 +384,136 @@ program
 program
   .command("whoami")
   .description("Show auth status, default agent, and tracked abilities")
+  .option("--json", "Output machine-readable JSON")
+  .action(async (opts: { json?: boolean }) => {
+    await whoamiCommand(opts);
+  });
+
+program
+  .command("set-jwt [token]")
+  .description(
+    "Save a session token to enable deploy (list, delete, toggle, assign now use API key)",
+  )
+  .action(async (token?: string) => {
+    await setJwtCommand(token);
+  });
+
+program
+  .command("mcp")
+  .description(
+    "Start the OpenHome MCP voice server for Claude Code integration",
+  )
   .action(async () => {
-    await whoamiCommand();
+    // Launch voice-server directly in-process
+    await import("./mcp/voice-server.js");
   });
 
 // ── Entry point: menu if no args, subcommand otherwise ───────────
 
-if (process.argv.length <= 2) {
-  interactiveMenu().catch((err: unknown) => {
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  });
-} else {
-  program.parseAsync(process.argv).catch((err: unknown) => {
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  });
-}
+checkForUpdates().then(() => {
+  if (process.argv.length <= 2) {
+    // No TTY (agent/pipe context) → print machine-readable reference instead of
+    // crashing into @clack/prompts which requires an interactive terminal
+    if (!process.stdout.isTTY) {
+      console.log(`# OpenHome CLI — Agent Reference v${version}
+
+OpenHome deploys Python "abilities" to AI voice agents. This CLI manages everything non-interactively.
+
+## Auth
+
+Option A — Environment variables (best for CI/agents, no disk writes):
+  export OPENHOME_API_KEY=<your_api_key>
+  export OPENHOME_JWT=<your_session_token>
+  # Then just run commands — no login needed
+
+Option B — Persistent login (run once, creds saved to ~/.openhome/config.json):
+  openhome login --key <API_KEY> --jwt <SESSION_TOKEN>
+  openhome whoami
+
+API_KEY  → app.openhome.com/dashboard/settings → API Keys
+JWT      → browser console on app.openhome.com: copy(localStorage.getItem('access_token'))
+
+Env vars take precedence over stored credentials. Use OPENHOME_NO_UPDATE=1 to skip update checks.
+
+## Commands (add --json to any for machine-readable output)
+
+deploy   Upload an ability zip
+  openhome deploy <path.zip> --name "Name" --description "Desc" --category skill --triggers "word1,word2" [--timeout 120] [--json]
+  categories: skill | brain_skill | background_daemon | local
+
+list     Show uploaded abilities
+  openhome list [--json]
+
+delete   Delete by ID or name — --yes skips confirmation
+  openhome delete <id|name> --yes [--json]
+
+toggle   Enable or disable
+  openhome toggle <id|name> --enable [--json]
+  openhome toggle <id|name> --disable [--json]
+
+assign   Link abilities to an agent (IDs or names accepted)
+  openhome assign --agent <agent_id|name> --capabilities <id1,id2,...> [--json]
+
+agents   List agents
+  openhome agents [--json]
+
+status   Detailed status for one ability
+  openhome status <id|name> [--json]
+
+whoami   Auth status, JWT expiry, default agent
+  openhome whoami [--json]
+
+trigger  Fire a trigger phrase
+  openhome trigger "phrase" --agent <agent_id>
+
+logs     Stream live agent messages
+  openhome logs --agent <agent_id>
+
+chat     WebSocket chat with an agent
+  openhome chat [agent_id]
+
+set-jwt  Save or update session token (persisted to Keychain on macOS)
+  openhome set-jwt <token>
+
+mcp      Start OpenHome MCP voice server
+  openhome mcp
+
+## Typical agent workflow
+  # Auth (once — creds stored in Keychain, survive reboots)
+  openhome login --key $OPENHOME_API_KEY --jwt $OPENHOME_JWT
+
+  # Or use env vars for stateless CI (no disk writes, no login step)
+  export OPENHOME_API_KEY=... OPENHOME_JWT=...
+
+  # Deploy, list, assign, clean up
+  openhome deploy ./skill.zip --name "my-skill" --description "Does X" --category skill --triggers "activate" --json
+  openhome list --json
+  openhome assign --agent "My Agent" --capabilities <id_from_list> --json
+  openhome delete <id> --yes --json
+
+## Exit codes
+  0 = success
+  1 = error
+  2 = auth error (expired JWT, invalid key — needs human intervention)
+
+## Notes
+- All commands fully non-interactive when flags supplied — no TTY required
+- Ability IDs are numeric (e.g. 3501); names also accepted everywhere
+- Agent IDs are UUIDs; names also work in --agent
+- JWT stored in macOS Keychain — survives reboots, no re-login each session
+- whoami --json shows jwt_status: valid | expiring_soon | expired | missing
+- OPENHOME_API_BASE overrides the API endpoint (for enterprise staging environments)
+- OPENHOME_NO_UPDATE=1 disables auto-update check`);
+      process.exit(0);
+    }
+    interactiveMenu().catch((err: unknown) => {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    });
+  } else {
+    program.parseAsync(process.argv).catch((err: unknown) => {
+      console.error(err instanceof Error ? err.message : String(err));
+      process.exit(1);
+    });
+  }
+});
