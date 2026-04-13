@@ -11,6 +11,7 @@ import { assignCommand } from "./commands/assign.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
 import { agentsCommand } from "./commands/agents.js";
+import { agentsEditCommand } from "./commands/agents-edit.js";
 import { logoutCommand } from "./commands/logout.js";
 import { chatCommand } from "./commands/chat.js";
 import { triggerCommand } from "./commands/trigger.js";
@@ -18,6 +19,7 @@ import { whoamiCommand } from "./commands/whoami.js";
 import { configEditCommand } from "./commands/config-edit.js";
 import { logsCommand } from "./commands/logs.js";
 import { setJwtCommand } from "./commands/set-jwt.js";
+import { validateCommand } from "./commands/validate.js";
 import { p, handleCancel } from "./ui/format.js";
 
 // Read version from package.json
@@ -343,13 +345,20 @@ program
     },
   );
 
-program
+const agentsCmd = program
   .command("agents")
   .description("View your agents and set a default")
   .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client")
   .action(async (opts: { mock?: boolean; json?: boolean }) => {
     await agentsCommand(opts);
+  });
+
+agentsCmd
+  .command("edit [agent]")
+  .description("Edit an agent's name and prompt in $EDITOR")
+  .action(async (agent?: string) => {
+    await agentsEditCommand(agent);
   });
 
 program
@@ -371,6 +380,13 @@ program
   .description("Edit trigger words, description, or category in config.json")
   .action(async (path?: string) => {
     await configEditCommand(path);
+  });
+
+program
+  .command("validate [path]")
+  .description("Validate an ability directory before deploying")
+  .action(async (path?: string) => {
+    await validateCommand(path);
   });
 
 program

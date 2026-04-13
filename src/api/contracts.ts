@@ -148,3 +148,10 @@ export interface AssignCapabilitiesRequest {
 export interface AssignCapabilitiesResponse {
   message?: string;
 }
+
+// Update personality name/prompt
+export interface UpdatePersonalityResponse {
+  detail?: string;
+  message?: string;
+  personality_id?: string;
+}

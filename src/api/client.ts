@@ -11,6 +11,7 @@ import type {
   DeleteCapabilityResponse,
   ToggleCapabilityResponse,
   AssignCapabilitiesResponse,
+  UpdatePersonalityResponse,
   UserCapability,
   AbilitySummaryWithExtras,
 } from "./contracts.js";
@@ -62,6 +63,11 @@ export interface IApiClient {
     personalityId: string,
     capabilityIds: number[],
   ): Promise<AssignCapabilitiesResponse>;
+  updatePersonality(
+    id: string,
+    name: string,
+    description: string,
+  ): Promise<UpdatePersonalityResponse>;
 }
 
 type AuthMode = "apikey" | "jwt" | "xapikey";
@@ -436,6 +442,22 @@ export class ApiClient implements IApiClient {
       form.append("matching_capabilities", String(capId));
     }
     return this.request<AssignCapabilitiesResponse>(
+      ENDPOINTS.editPersonality,
+      { method: "PUT", body: form },
+      "xapikey",
+    );
+  }
+
+  async updatePersonality(
+    id: string,
+    name: string,
+    description: string,
+  ): Promise<UpdatePersonalityResponse> {
+    const form = new FormData();
+    form.append("personality_id", id);
+    form.append("name", name);
+    form.append("description", description);
+    return this.request<UpdatePersonalityResponse>(
       ENDPOINTS.editPersonality,
       { method: "PUT", body: form },
       "xapikey",
