@@ -32,13 +32,17 @@ export interface UploadAbilityMetadata {
 }
 
 export interface UploadAbilityResponse {
-  ability_id: string;
-  unique_name: string;
-  version: number;
-  status: "processing" | "active" | "failed";
-  validation_errors: string[];
-  created_at: string;
-  message: string;
+  // Actual API returns capability_id + detail
+  capability_id?: number;
+  detail?: string;
+  // Legacy / future fields (may be absent)
+  ability_id?: string;
+  unique_name?: string;
+  version?: number;
+  status?: "processing" | "active" | "failed";
+  validation_errors?: string[];
+  created_at?: string;
+  message?: string;
 }
 
 export interface AbilitySummary {
@@ -71,6 +75,24 @@ export interface InstalledCapability {
   system_capability?: boolean;
   agent_capability?: boolean;
   shortcut?: boolean;
+}
+
+// Raw shape returned by get-all-capabilities (user-created abilities)
+export interface UserCapability {
+  id: number;
+  name: string;
+  category: string;
+  description: string;
+  trigger_words: string[];
+  is_installed: boolean;
+  is_approved: boolean;
+  is_published: boolean;
+  last_updated?: string;
+  capability_versions?: {
+    id: number;
+    version: string;
+    is_user_enabled: boolean;
+  }[];
 }
 
 export interface ListAbilitiesResponse {

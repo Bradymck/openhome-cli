@@ -1,15 +1,22 @@
 import { ApiClient, NotImplementedError } from "../api/client.js";
 import { handleIfSessionExpired } from "./handle-session-expired.js";
 import { MockApiClient } from "../api/mock-client.js";
-import { getApiKey, getConfig, getJwt } from "../config/store.js";
-import { error, success, p, handleCancel } from "../ui/format.js";
+import { getApiKey, getApiBase, getJwt } from "../config/store.js";
+import {
+  error,
+  success,
+  p,
+  handleCancel,
+  jsonOut,
+  jsonError,
+} from "../ui/format.js";
 import chalk from "chalk";
 
 export async function deleteCommand(
   abilityArg?: string,
-  opts: { mock?: boolean } = {},
+  opts: { mock?: boolean; yes?: boolean; json?: boolean } = {},
 ): Promise<void> {
-  p.intro("🗑️  Delete ability");
+  if (!opts.json) p.intro("🗑️  Delete ability");
 
   let client: ApiClient | MockApiClient;
 
@@ -19,33 +26,44 @@ export async function deleteCommand(
     const apiKey = getApiKey() ?? "";
     const jwt = getJwt() ?? undefined;
     if (!apiKey) {
+      if (opts.json)
+        jsonError(
+          "UNAUTHENTICATED",
+          "Not authenticated. Set OPENHOME_API_KEY env var.",
+          2,
+        );
       error("Not authenticated. Run: openhome login");
       process.exit(1);
     }
-    client = new ApiClient(apiKey, getConfig().api_base_url, jwt);
+    client = new ApiClient(apiKey, getApiBase(), jwt);
   }
 
-  // Fetch abilities to let user pick
-  const s = p.spinner();
-  s.start("Fetching abilities...");
+  const s = opts.json ? null : p.spinner();
+  s?.start("Fetching abilities...");
 
   let abilities: Awaited<ReturnType<typeof client.listAbilities>>["abilities"];
   try {
     const result = await client.listAbilities();
     abilities = result.abilities;
-    s.stop(`Found ${abilities.length} ability(s).`);
+    s?.stop(`Found ${abilities.length} ability(s).`);
   } catch (err) {
-    s.stop("Failed to fetch abilities.");
-    error(err instanceof Error ? err.message : String(err));
+    s?.stop("Failed to fetch abilities.");
+    const msg = err instanceof Error ? err.message : String(err);
+    if (opts.json) jsonError("ERROR", msg);
+    error(msg);
     process.exit(1);
   }
 
   if (abilities.length === 0) {
-    p.outro("No abilities to delete.");
+    if (opts.json)
+      jsonOut({
+        ok: false,
+        error: { code: "NO_ABILITIES", message: "No abilities to delete." },
+      });
+    else p.outro("No abilities to delete.");
     return;
   }
 
-  // Resolve target: arg → match by name, or prompt
   let targetId: string;
   let targetName: string;
 
@@ -57,6 +75,8 @@ export async function deleteCommand(
         a.ability_id === abilityArg,
     );
     if (!match) {
+      if (opts.json)
+        jsonError("NOT_FOUND", `No ability found matching "${abilityArg}".`);
       error(`No ability found matching "${abilityArg}".`);
       process.exit(1);
     }
@@ -77,34 +97,49 @@ export async function deleteCommand(
       abilities.find((a) => a.ability_id === targetId)?.unique_name ?? targetId;
   }
 
-  // Confirm
-  const confirmed = await p.confirm({
-    message: `Delete "${targetName}"? This cannot be undone.`,
-    initialValue: false,
-  });
-  handleCancel(confirmed);
-
-  if (!confirmed) {
-    p.cancel("Aborted.");
-    return;
+  if (!opts.yes && !opts.json) {
+    const confirmed = await p.confirm({
+      message: `Delete "${targetName}"? This cannot be undone.`,
+      initialValue: false,
+    });
+    handleCancel(confirmed);
+    if (!confirmed) {
+      p.cancel("Aborted.");
+      return;
+    }
   }
 
-  s.start(`Deleting "${targetName}"...`);
+  s?.start(`Deleting "${targetName}"...`);
   try {
     const result = await client.deleteCapability(targetId);
-    s.stop("Deleted.");
+    s?.stop("Deleted.");
+
+    if (opts.json) {
+      jsonOut({
+        ok: true,
+        deleted_id: targetId,
+        name: targetName,
+        message: result.message ?? "Deleted successfully.",
+      });
+      return;
+    }
+
     success(result.message ?? `"${targetName}" deleted successfully.`);
     p.outro("Done.");
   } catch (err) {
-    s.stop("Delete failed.");
+    s?.stop("Delete failed.");
 
     if (err instanceof NotImplementedError) {
+      if (opts.json)
+        jsonError("NOT_IMPLEMENTED", "Delete endpoint not yet implemented.");
       p.note("API Not Available Yet", "Delete endpoint not yet implemented.");
       return;
     }
 
-    if (await handleIfSessionExpired(err)) return;
-    error(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+    if (await handleIfSessionExpired(err, opts)) return;
+    const msg = `Delete failed: ${err instanceof Error ? err.message : String(err)}`;
+    if (opts.json) jsonError("ERROR", msg);
+    error(msg);
     process.exit(1);
   }
 }

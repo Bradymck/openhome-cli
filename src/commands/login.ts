@@ -13,7 +13,8 @@ export function openBrowser(url: string): void {
     if (process.platform === "darwin") {
       execFile("open", [url]);
     } else if (process.platform === "win32") {
-      execFile("cmd", ["/c", "start", url]);
+      // Empty string is the window title — prevents 'start' misinterpreting URLs with special chars
+      execFile("cmd", ["/c", "start", "", url]);
     } else {
       execFile("xdg-open", [url]);
     }
@@ -22,7 +23,39 @@ export function openBrowser(url: string): void {
   }
 }
 
-export async function loginCommand(): Promise<void> {
+export async function loginCommand(
+  opts: { key?: string; jwt?: string } = {},
+): Promise<void> {
+  // Non-interactive fast path: both key and jwt provided via flags
+  if (opts.key) {
+    const { saveApiKey, saveJwt } = await import("../config/store.js");
+    const s = p.spinner();
+    s.start("Verifying API key...");
+    try {
+      const client = new ApiClient(opts.key);
+      await client.getPersonalities();
+      s.stop("API key verified.");
+    } catch (err) {
+      s.stop("Verification failed.");
+      error(
+        err instanceof Error && err.message.includes("401")
+          ? "Invalid API key."
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
+      process.exit(1);
+    }
+    saveApiKey(opts.key);
+    if (opts.jwt) {
+      saveJwt(opts.jwt.trim());
+      success("API key and session token saved.");
+    } else {
+      success("API key saved.");
+    }
+    return;
+  }
+
   p.intro("🔑 OpenHome Login");
 
   // Step 1: API key

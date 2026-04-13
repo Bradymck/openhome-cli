@@ -6,10 +6,10 @@ export const ENDPOINTS = {
   getPersonalities: "/api/sdk/get_personalities",
   verifyApiKey: "/api/sdk/verify_apikey/",
   uploadCapability: "/api/capabilities/add-capability/",
-  listCapabilities: "/api/capabilities/get-installed-capabilities/",
-  deleteCapability: (id: string) =>
-    `/api/capabilities/delete-capability/${id}/`,
-  bulkDeleteCapabilities: "/api/capabilities/delete-capability/",
+  listCapabilities: "/api/capabilities/get-all-capabilities/",
+  deleteCapability: (id: string) => `/api/capabilities/delete-capability/${id}`,
+  uninstallCapability: (id: string) =>
+    `/api/capabilities/uninstall-capability/${id}/`,
   editInstalledCapability: (id: string) =>
     `/api/capabilities/edit-installed-capability/${id}/`,
   editPersonality: "/api/personalities/edit-personality/",

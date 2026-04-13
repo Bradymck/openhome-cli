@@ -4,12 +4,12 @@ import { homedir } from "node:os";
 import { ApiClient } from "../api/client.js";
 import { handleIfSessionExpired } from "./handle-session-expired.js";
 import { MockApiClient } from "../api/mock-client.js";
-import { getApiKey, getConfig, getJwt } from "../config/store.js";
+import { getApiKey, getApiBase, getConfig, getJwt } from "../config/store.js";
 import type {
   AbilityCategory,
   UploadAbilityMetadata,
 } from "../api/contracts.js";
-import { error, p, handleCancel } from "../ui/format.js";
+import { error, p, handleCancel, jsonOut, jsonError } from "../ui/format.js";
 
 function expandPath(p: string): string {
   if (p.startsWith("~/") || p === "~") {
@@ -56,15 +56,20 @@ export async function deployCommand(
     description?: string;
     category?: string;
     triggers?: string;
+    json?: boolean;
+    timeout?: string; // seconds as string from commander
   } = {},
 ): Promise<void> {
-  p.intro("🚀 Upload Ability");
+  if (!opts.json) p.intro("🚀 Upload Ability");
+
+  const timeoutMs = opts.timeout ? parseInt(opts.timeout, 10) * 1000 : 120_000;
 
   let zipPath: string;
 
   if (pathArg) {
     const resolved = expandPath(pathArg);
     if (!existsSync(resolved)) {
+      if (opts.json) jsonError("NOT_FOUND", `File not found: ${pathArg}`);
       error(`File not found: ${pathArg}`);
       process.exit(1);
     }
@@ -78,7 +83,6 @@ export async function deployCommand(
       join(home, "Documents"),
     ].flatMap((d) => scanForZips(d));
 
-    // Deduplicate by path
     const seen = new Set<string>();
     const uniqueZips = foundZips.filter(
       (z) => !seen.has(z.path) && seen.add(z.path),
@@ -129,7 +133,6 @@ export async function deployCommand(
     }
   }
 
-  // Metadata — use flags if provided, otherwise prompt
   const zipName = basename(zipPath, ".zip");
   const defaultName = zipName.toLowerCase().replace(/[^a-z0-9-]/g, "-");
 
@@ -211,6 +214,7 @@ export async function deployCommand(
       .map((w) => w.trim())
       .filter(Boolean);
   }
+
   const personalityId = opts.personality ?? getConfig().default_personality_id;
 
   const metadata: UploadAbilityMetadata = {
@@ -227,26 +231,30 @@ export async function deployCommand(
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "EPERM" || code === "EACCES") {
-      error(
+      const msg =
         `Permission denied: macOS is blocking access to this file.\n` +
-          `  Fix: System Settings → Privacy & Security → Full Disk Access → enable your terminal\n` +
-          `  Or move the zip somewhere accessible first:\n` +
-          `  cp "${zipPath}" /tmp/${basename(zipPath)} && openhome deploy /tmp/${basename(zipPath)}`,
-      );
+        `  Fix: System Settings → Privacy & Security → Full Disk Access → enable your terminal\n` +
+        `  Or move the zip: cp "${zipPath}" /tmp/${basename(zipPath)}`;
+      if (opts.json) jsonError("EPERM", msg);
+      error(msg);
     } else {
-      error(
-        `Could not read zip file: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      const msg = `Could not read zip file: ${err instanceof Error ? err.message : String(err)}`;
+      if (opts.json) jsonError("READ_ERROR", msg);
+      error(msg);
     }
     process.exit(1);
   }
 
   if (opts.mock) {
-    const s = p.spinner();
-    s.start("Uploading (mock)...");
+    const s = opts.json ? null : p.spinner();
+    s?.start("Uploading (mock)...");
     const mockClient = new MockApiClient();
     await mockClient.uploadAbility(zipBuffer, null, null, metadata);
-    s.stop("Mock upload complete.");
+    s?.stop("Mock upload complete.");
+    if (opts.json) {
+      jsonOut({ ok: true, mock: true, name, message: "Mock deploy complete." });
+      return;
+    }
     p.outro("Mock deploy complete.");
     return;
   }
@@ -254,37 +262,68 @@ export async function deployCommand(
   const apiKey = getApiKey() ?? "";
   const jwt = getJwt() ?? undefined;
   if (!apiKey) {
+    if (opts.json)
+      jsonError(
+        "UNAUTHENTICATED",
+        "Not authenticated. Set OPENHOME_API_KEY env var.",
+        2,
+      );
     error("Not authenticated. Run: openhome login");
     process.exit(1);
   }
 
-  const s = p.spinner();
-  s.start("Uploading ability...");
+  const s = opts.json ? null : p.spinner();
+  s?.start("Uploading ability...");
   try {
-    const client = new ApiClient(apiKey, getConfig().api_base_url, jwt);
-    const result = await client.uploadAbility(zipBuffer, null, null, metadata);
-    s.stop("Upload complete.");
-    p.note(
-      [
-        `Ability ID: ${result.ability_id}`,
-        `Version:    ${result.version}`,
-        `Status:     ${result.status}`,
-        result.message ? `Message:    ${result.message}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      "Deploy Result",
+    const client = new ApiClient(apiKey, getApiBase(), jwt);
+    const result = await client.uploadAbility(
+      zipBuffer,
+      null,
+      null,
+      metadata,
+      timeoutMs,
     );
+    s?.stop("Upload complete.");
+
+    const id = result.capability_id ?? result.ability_id ?? "—";
+
+    if (opts.json) {
+      jsonOut({
+        ok: true,
+        ability_id: String(id),
+        name,
+        version: result.version ?? null,
+        status: result.status ?? null,
+        message: result.detail ?? result.message ?? "Deployed successfully.",
+      });
+      return;
+    }
+
+    const lines = [
+      `Ability ID: ${id}`,
+      result.version != null ? `Version:    ${result.version}` : "",
+      result.status ? `Status:     ${result.status}` : "",
+      (result.detail ?? result.message)
+        ? `Message:    ${result.detail ?? result.message}`
+        : "",
+    ].filter(Boolean);
+    p.note(lines.join("\n"), "Deploy Result");
     p.outro("Deployed successfully!");
   } catch (err) {
-    s.stop("Upload failed.");
-    if (await handleIfSessionExpired(err)) return;
+    s?.stop("Upload failed.");
+    if (await handleIfSessionExpired(err, opts)) return;
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.toLowerCase().includes("same name")) {
+      if (opts.json)
+        jsonError(
+          "DUPLICATE_NAME",
+          `An ability named "${name}" already exists. Delete it first: openhome delete ${name} --yes`,
+        );
       error(
         `An ability named "${name}" already exists. Delete it first: openhome delete`,
       );
     } else {
+      if (opts.json) jsonError("ERROR", `Deploy failed: ${msg}`);
       error(`Deploy failed: ${msg}`);
     }
     process.exit(1);

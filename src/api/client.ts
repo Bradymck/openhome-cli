@@ -11,7 +11,7 @@ import type {
   DeleteCapabilityResponse,
   ToggleCapabilityResponse,
   AssignCapabilitiesResponse,
-  InstalledCapability,
+  UserCapability,
   AbilitySummaryWithExtras,
 } from "./contracts.js";
 import { API_BASE, ENDPOINTS } from "./endpoints.js";
@@ -49,6 +49,7 @@ export interface IApiClient {
     imageBuffer: Buffer | null,
     imageName: string | null,
     metadata: UploadAbilityMetadata,
+    timeoutMs?: number,
   ): Promise<UploadAbilityResponse>;
   listAbilities(): Promise<ListAbilitiesResponse>;
   getAbility(id: string): Promise<GetAbilityResponse>;
@@ -64,6 +65,40 @@ export interface IApiClient {
 }
 
 type AuthMode = "apikey" | "jwt" | "xapikey";
+
+// Statuses worth retrying (transient server/network errors)
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 3;
+const BASE_DELAY_MS = 1000;
+const MAX_DELAY_MS = 10_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+function isRetryableNetworkError(err: unknown): boolean {
+  if (!(err instanceof TypeError)) return false;
+  const msg = err.message.toLowerCase();
+  return (
+    msg.includes("fetch failed") ||
+    msg.includes("econnreset") ||
+    msg.includes("econnrefused") ||
+    msg.includes("etimedout") ||
+    msg.includes("network")
+  );
+}
+
+function retryDelay(attempt: number, retryAfterHeader?: string | null): number {
+  if (retryAfterHeader) {
+    const seconds = parseInt(retryAfterHeader, 10);
+    if (!isNaN(seconds)) return Math.min(seconds * 1000, 30_000);
+    const date = Date.parse(retryAfterHeader);
+    if (!isNaN(date)) return Math.max(0, date - Date.now());
+  }
+  const jitter = Math.random() * 500;
+  return Math.min(BASE_DELAY_MS * Math.pow(2, attempt) + jitter, MAX_DELAY_MS);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class ApiClient implements IApiClient {
   private readonly baseUrl: string;
@@ -83,10 +118,10 @@ export class ApiClient implements IApiClient {
     path: string,
     options: RequestInit = {},
     auth: AuthMode = "apikey",
+    timeoutMs = DEFAULT_TIMEOUT_MS,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
 
-    // Build auth headers
     const authHeaders: Record<string, string> = {};
     if (auth === "jwt") {
       authHeaders["Authorization"] = `Bearer ${this.jwt}`;
@@ -96,52 +131,92 @@ export class ApiClient implements IApiClient {
       authHeaders["Authorization"] = `Bearer ${this.apiKey}`;
     }
 
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...authHeaders,
-        ...(options.headers ?? {}),
-      },
-    });
+    let lastError: unknown;
 
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new NotImplementedError(path);
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        await sleep(retryDelay(attempt));
       }
 
-      let body: Record<string, unknown> | null = null;
+      let response: Response;
       try {
-        body = (await response.json()) as Record<string, unknown>;
-      } catch {
-        // ignore parse errors
+        response = await fetch(url, {
+          ...options,
+          headers: { ...authHeaders, ...(options.headers ?? {}) },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (err) {
+        // Timeout or network error
+        if (err instanceof DOMException && err.name === "TimeoutError") {
+          lastError = new ApiError(
+            "TIMEOUT",
+            `Request timed out after ${timeoutMs / 1000}s`,
+          );
+          continue; // retry on timeout
+        }
+        if (isRetryableNetworkError(err)) {
+          lastError = err;
+          continue; // retry on transient network errors
+        }
+        throw err; // non-retryable (e.g. programming error)
       }
 
-      if (
-        (body as ApiErrorResponse | null)?.error?.code === "NOT_IMPLEMENTED"
-      ) {
-        throw new NotImplementedError(path);
+      // Retry on transient server errors
+      if (RETRYABLE_STATUSES.has(response.status)) {
+        const retryAfter = response.headers.get("Retry-After");
+        lastError = new ApiError(
+          String(response.status),
+          `Server error ${response.status}`,
+        );
+        await sleep(retryDelay(attempt, retryAfter));
+        continue;
       }
 
-      const message =
-        (body?.detail as string) ??
-        (body as ApiErrorResponse | null)?.error?.message ??
-        response.statusText;
+      if (!response.ok) {
+        if (response.status === 404) throw new NotImplementedError(path);
 
-      // Detect expired/invalid JWT
-      if (
-        auth === "jwt" &&
-        (response.status === 401 ||
-          message.toLowerCase().includes("token not valid") ||
-          message.toLowerCase().includes("token is invalid") ||
-          message.toLowerCase().includes("not valid for any token"))
-      ) {
-        throw new SessionExpiredError();
+        let body: Record<string, unknown> | null = null;
+        try {
+          body = (await response.json()) as Record<string, unknown>;
+        } catch {
+          // ignore parse errors
+        }
+
+        if (
+          (body as ApiErrorResponse | null)?.error?.code === "NOT_IMPLEMENTED"
+        ) {
+          throw new NotImplementedError(path);
+        }
+
+        const message =
+          (body?.detail as string) ??
+          (body as ApiErrorResponse | null)?.error?.message ??
+          response.statusText;
+
+        if (
+          auth === "jwt" &&
+          (response.status === 401 ||
+            message.toLowerCase().includes("token not valid") ||
+            message.toLowerCase().includes("token is invalid") ||
+            message.toLowerCase().includes("not valid for any token"))
+        ) {
+          throw new SessionExpiredError();
+        }
+
+        throw new ApiError(String(response.status), message);
       }
 
-      throw new ApiError(String(response.status), message);
+      return response.json() as Promise<T>;
     }
 
-    return response.json() as Promise<T>;
+    // All attempts exhausted
+    throw (
+      lastError ??
+      new ApiError(
+        "NETWORK_ERROR",
+        `Request to ${path} failed after ${MAX_ATTEMPTS} attempts`,
+      )
+    );
   }
 
   async getPersonalities(): Promise<Personality[]> {
@@ -161,8 +236,8 @@ export class ApiClient implements IApiClient {
     imageBuffer: Buffer | null,
     imageName: string | null,
     metadata: UploadAbilityMetadata,
+    timeoutMs = 120_000, // 2 min default — large zips on slow connections
   ): Promise<UploadAbilityResponse> {
-    // Use form-data package for reliable multipart uploads with correct MIME types
     const form = new FormDataLib();
     form.append("zip_file", zipBuffer, {
       filename: "ability.zip",
@@ -188,56 +263,89 @@ export class ApiClient implements IApiClient {
     }
 
     const url = `${this.baseUrl}${ENDPOINTS.uploadCapability}`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.jwt}`,
-        ...form.getHeaders(),
-      },
-      body: form.getBuffer() as unknown as BodyInit,
-    });
 
-    if (!response.ok) {
-      let body: Record<string, unknown> | null = null;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      if (attempt > 0) await sleep(retryDelay(attempt));
+
+      let response: Response;
       try {
-        body = (await response.json()) as Record<string, unknown>;
-      } catch {
-        // ignore
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${this.jwt}`,
+            ...form.getHeaders(),
+          },
+          body: form.getBuffer() as unknown as BodyInit,
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "TimeoutError") {
+          throw new ApiError(
+            "TIMEOUT",
+            `Upload timed out after ${timeoutMs / 1000}s. Use --timeout to increase the limit.`,
+          );
+        }
+        if (isRetryableNetworkError(err)) {
+          lastErr = err;
+          continue;
+        }
+        throw err;
       }
-      const message =
-        (body?.detail as string) ??
-        (body as ApiErrorResponse | null)?.error?.message ??
-        response.statusText;
 
-      if (
-        response.status === 401 ||
-        message.toLowerCase().includes("token not valid") ||
-        message.toLowerCase().includes("token is invalid") ||
-        message.toLowerCase().includes("not valid for any token")
-      ) {
-        throw new SessionExpiredError();
+      if (RETRYABLE_STATUSES.has(response.status)) {
+        lastErr = new ApiError(
+          String(response.status),
+          `Server error ${response.status}`,
+        );
+        continue;
       }
-      throw new ApiError(String(response.status), message);
+
+      if (!response.ok) {
+        let body: Record<string, unknown> | null = null;
+        try {
+          body = (await response.json()) as Record<string, unknown>;
+        } catch {
+          // ignore
+        }
+        const message =
+          (body?.detail as string) ??
+          (body as ApiErrorResponse | null)?.error?.message ??
+          response.statusText;
+
+        if (
+          response.status === 401 ||
+          message.toLowerCase().includes("token not valid") ||
+          message.toLowerCase().includes("token is invalid") ||
+          message.toLowerCase().includes("not valid for any token")
+        ) {
+          throw new SessionExpiredError();
+        }
+        throw new ApiError(String(response.status), message);
+      }
+
+      return response.json() as Promise<UploadAbilityResponse>;
     }
 
-    return response.json() as Promise<UploadAbilityResponse>;
+    throw (
+      lastErr ?? new ApiError("NETWORK_ERROR", "Upload failed after retries")
+    );
   }
 
   async listAbilities(): Promise<ListAbilitiesResponse> {
-    // Now supports X-API-KEY auth — no JWT needed
-    const data = await this.request<InstalledCapability[]>(
+    // get-all-capabilities returns user-created abilities, JWT auth
+    const data = await this.request<UserCapability[]>(
       ENDPOINTS.listCapabilities,
       { method: "GET" },
-      "xapikey",
+      "jwt",
     );
-    // Normalise to AbilitySummary shape
     return {
       abilities: data.map((c) => ({
         ability_id: String(c.id),
         unique_name: c.name,
         display_name: c.name,
-        version: 1,
-        status: c.enabled ? "active" : "disabled",
+        version: c.capability_versions?.length ?? 1,
+        status: c.is_installed ? "active" : "processing",
         personality_ids: [],
         created_at: c.last_updated ?? new Date().toISOString(),
         updated_at: c.last_updated ?? new Date().toISOString(),
@@ -268,25 +376,22 @@ export class ApiClient implements IApiClient {
   }
 
   async deleteCapability(id: string): Promise<DeleteCapabilityResponse> {
-    // Try bulk POST endpoint first, fall back to legacy DELETE
+    // Try user-capability delete (JWT) first, fall back to uninstall for system abilities
     try {
       return await this.request<DeleteCapabilityResponse>(
-        ENDPOINTS.bulkDeleteCapabilities,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ids: [Number.isNaN(Number(id)) ? id : Number(id)],
-          }),
-        },
-        "xapikey",
+        ENDPOINTS.deleteCapability(id),
+        { method: "DELETE" },
+        "jwt",
       );
     } catch (err) {
-      if (err instanceof NotImplementedError) {
+      if (
+        err instanceof ApiError &&
+        err.message.includes("Invalid user Ability")
+      ) {
         return this.request<DeleteCapabilityResponse>(
-          ENDPOINTS.deleteCapability(id),
+          ENDPOINTS.uninstallCapability(id),
           { method: "DELETE" },
-          "xapikey",
+          "jwt",
         );
       }
       throw err;

@@ -1,6 +1,6 @@
 {
   "name": "openhome-cli",
-  "version": "0.1.27",
+  "version": "0.1.32",
   "description": "CLI for managing OpenHome voice AI abilities",
   "type": "module",
   "bin": {

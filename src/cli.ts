@@ -35,8 +35,9 @@ try {
 
 // ── Auto-update check ────────────────────────────────────────────
 async function checkForUpdates(): Promise<void> {
-  // Skip if explicitly disabled or already running via auto-update re-exec
+  // Skip if disabled, re-execing, or in JSON mode (would corrupt piped output)
   if (process.env.OPENHOME_NO_UPDATE === "1") return;
+  if (process.argv.includes("--json")) return;
 
   try {
     const res = await fetch("https://registry.npmjs.org/openhome-cli/latest", {
@@ -44,7 +45,9 @@ async function checkForUpdates(): Promise<void> {
     });
     const data = (await res.json()) as { version?: string };
     const latest = data.version;
+    // Validate semver format before using — guards against poisoned registry responses
     if (!latest || latest === version) return;
+    if (!/^\d+\.\d+\.\d+$/.test(latest)) return;
 
     // Only act if npm version is strictly newer
     const toNum = (v: string) =>
@@ -210,8 +213,10 @@ program
 program
   .command("login")
   .description("Authenticate with your OpenHome API key")
-  .action(async () => {
-    await loginCommand();
+  .option("--key <api_key>", "API key (skips prompts)")
+  .option("--jwt <token>", "Session token (skips browser step)")
+  .action(async (opts: { key?: string; jwt?: string }) => {
+    await loginCommand(opts);
   });
 
 program
@@ -226,9 +231,18 @@ program
   .description("Upload an ability zip to OpenHome")
   .option("--name <name>", "Ability name (skips prompt)")
   .option("--description <desc>", "Description (skips prompt)")
-  .option("--category <cat>", "Category: skill | brain | daemon (skips prompt)")
+  .option(
+    "--category <cat>",
+    "Category: skill | brain_skill | background_daemon | local",
+  )
   .option("--triggers <words>", "Comma-separated trigger words (skips prompt)")
   .option("--personality <id>", "Agent ID to attach the ability to")
+  .option(
+    "--timeout <seconds>",
+    "Upload timeout in seconds (default: 120)",
+    "120",
+  )
+  .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client (no real network calls)")
   .action(
     async (
@@ -240,6 +254,8 @@ program
         description?: string;
         category?: string;
         triggers?: string;
+        timeout?: string;
+        json?: boolean;
       },
     ) => {
       await deployCommand(path, opts);
@@ -264,29 +280,43 @@ program
 program
   .command("list")
   .description("List all deployed abilities")
+  .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client")
-  .action(async (opts: { mock?: boolean }) => {
+  .action(async (opts: { mock?: boolean; json?: boolean }) => {
     await listCommand(opts);
   });
 
 program
   .command("delete [ability]")
   .description("Delete a deployed ability")
+  .option("--yes", "Skip confirmation prompt")
+  .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client")
-  .action(async (ability: string | undefined, opts: { mock?: boolean }) => {
-    await deleteCommand(ability, opts);
-  });
+  .action(
+    async (
+      ability: string | undefined,
+      opts: { mock?: boolean; yes?: boolean; json?: boolean },
+    ) => {
+      await deleteCommand(ability, opts);
+    },
+  );
 
 program
   .command("toggle [ability]")
   .description("Enable or disable a deployed ability")
   .option("--enable", "Enable the ability")
   .option("--disable", "Disable the ability")
+  .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client")
   .action(
     async (
       ability: string | undefined,
-      opts: { mock?: boolean; enable?: boolean; disable?: boolean },
+      opts: {
+        mock?: boolean;
+        enable?: boolean;
+        disable?: boolean;
+        json?: boolean;
+      },
     ) => {
       await toggleCommand(ability, opts);
     },
@@ -295,26 +325,46 @@ program
 program
   .command("assign")
   .description("Assign abilities to an agent")
+  .option("--agent <id>", "Agent ID or name (skips prompt)")
+  .option(
+    "--capabilities <ids>",
+    "Comma-separated ability IDs or names (skips prompt)",
+  )
+  .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client")
-  .action(async (opts: { mock?: boolean }) => {
-    await assignCommand(opts);
-  });
+  .action(
+    async (opts: {
+      mock?: boolean;
+      agent?: string;
+      capabilities?: string;
+      json?: boolean;
+    }) => {
+      await assignCommand(opts);
+    },
+  );
 
 program
   .command("agents")
   .description("View your agents and set a default")
+  .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client")
-  .action(async (opts: { mock?: boolean }) => {
+  .action(async (opts: { mock?: boolean; json?: boolean }) => {
     await agentsCommand(opts);
   });
 
 program
   .command("status [ability]")
   .description("Show detailed status of an ability")
+  .option("--json", "Output machine-readable JSON")
   .option("--mock", "Use mock API client")
-  .action(async (ability: string | undefined, opts: { mock?: boolean }) => {
-    await statusCommand(ability, opts);
-  });
+  .action(
+    async (
+      ability: string | undefined,
+      opts: { mock?: boolean; json?: boolean },
+    ) => {
+      await statusCommand(ability, opts);
+    },
+  );
 
 program
   .command("config [path]")
@@ -334,8 +384,9 @@ program
 program
   .command("whoami")
   .description("Show auth status, default agent, and tracked abilities")
-  .action(async () => {
-    await whoamiCommand();
+  .option("--json", "Output machine-readable JSON")
+  .action(async (opts: { json?: boolean }) => {
+    await whoamiCommand(opts);
   });
 
 program
@@ -361,6 +412,100 @@ program
 
 checkForUpdates().then(() => {
   if (process.argv.length <= 2) {
+    // No TTY (agent/pipe context) → print machine-readable reference instead of
+    // crashing into @clack/prompts which requires an interactive terminal
+    if (!process.stdout.isTTY) {
+      console.log(`# OpenHome CLI — Agent Reference v${version}
+
+OpenHome deploys Python "abilities" to AI voice agents. This CLI manages everything non-interactively.
+
+## Auth
+
+Option A — Environment variables (best for CI/agents, no disk writes):
+  export OPENHOME_API_KEY=<your_api_key>
+  export OPENHOME_JWT=<your_session_token>
+  # Then just run commands — no login needed
+
+Option B — Persistent login (run once, creds saved to ~/.openhome/config.json):
+  openhome login --key <API_KEY> --jwt <SESSION_TOKEN>
+  openhome whoami
+
+API_KEY  → app.openhome.com/dashboard/settings → API Keys
+JWT      → browser console on app.openhome.com: copy(localStorage.getItem('access_token'))
+
+Env vars take precedence over stored credentials. Use OPENHOME_NO_UPDATE=1 to skip update checks.
+
+## Commands (add --json to any for machine-readable output)
+
+deploy   Upload an ability zip
+  openhome deploy <path.zip> --name "Name" --description "Desc" --category skill --triggers "word1,word2" [--timeout 120] [--json]
+  categories: skill | brain_skill | background_daemon | local
+
+list     Show uploaded abilities
+  openhome list [--json]
+
+delete   Delete by ID or name — --yes skips confirmation
+  openhome delete <id|name> --yes [--json]
+
+toggle   Enable or disable
+  openhome toggle <id|name> --enable [--json]
+  openhome toggle <id|name> --disable [--json]
+
+assign   Link abilities to an agent (IDs or names accepted)
+  openhome assign --agent <agent_id|name> --capabilities <id1,id2,...> [--json]
+
+agents   List agents
+  openhome agents [--json]
+
+status   Detailed status for one ability
+  openhome status <id|name> [--json]
+
+whoami   Auth status, JWT expiry, default agent
+  openhome whoami [--json]
+
+trigger  Fire a trigger phrase
+  openhome trigger "phrase" --agent <agent_id>
+
+logs     Stream live agent messages
+  openhome logs --agent <agent_id>
+
+chat     WebSocket chat with an agent
+  openhome chat [agent_id]
+
+set-jwt  Save or update session token (persisted to Keychain on macOS)
+  openhome set-jwt <token>
+
+mcp      Start OpenHome MCP voice server
+  openhome mcp
+
+## Typical agent workflow
+  # Auth (once — creds stored in Keychain, survive reboots)
+  openhome login --key $OPENHOME_API_KEY --jwt $OPENHOME_JWT
+
+  # Or use env vars for stateless CI (no disk writes, no login step)
+  export OPENHOME_API_KEY=... OPENHOME_JWT=...
+
+  # Deploy, list, assign, clean up
+  openhome deploy ./skill.zip --name "my-skill" --description "Does X" --category skill --triggers "activate" --json
+  openhome list --json
+  openhome assign --agent "My Agent" --capabilities <id_from_list> --json
+  openhome delete <id> --yes --json
+
+## Exit codes
+  0 = success
+  1 = error
+  2 = auth error (expired JWT, invalid key — needs human intervention)
+
+## Notes
+- All commands fully non-interactive when flags supplied — no TTY required
+- Ability IDs are numeric (e.g. 3501); names also accepted everywhere
+- Agent IDs are UUIDs; names also work in --agent
+- JWT stored in macOS Keychain — survives reboots, no re-login each session
+- whoami --json shows jwt_status: valid | expiring_soon | expired | missing
+- OPENHOME_API_BASE overrides the API endpoint (for enterprise staging environments)
+- OPENHOME_NO_UPDATE=1 disables auto-update check`);
+      process.exit(0);
+    }
     interactiveMenu().catch((err: unknown) => {
       console.error(err instanceof Error ? err.message : String(err));
       process.exit(1);
