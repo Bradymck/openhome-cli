@@ -1,3 +1,14 @@
+/**
+ * @deprecated Not registered in the CLI.
+ *
+ * Manual scaffolding is not useful in practice — abilities are built with AI
+ * agents (Claude Code, etc.) that handle file creation and deploy automatically.
+ * This file is kept in case the community requests an `openhome init` command.
+ * To enable: import initCommand in cli.ts and register it as a command.
+ *
+ * Feature requests: https://github.com/Bradymck/openhome-cli/issues
+ */
+
 import {
   mkdirSync,
   writeFileSync,
