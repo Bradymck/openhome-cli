@@ -1,11 +1,9 @@
-import WebSocket from "ws";
-import { getApiKey, getConfig } from "../config/store.js";
+import { getApiKey, getConfig, getApiBase } from "../config/store.js";
 import { ApiClient } from "../api/client.js";
-import { WS_BASE, ENDPOINTS } from "../api/endpoints.js";
-import { error, success, info, p, handleCancel } from "../ui/format.js";
+import { error, info, p, handleCancel } from "../ui/format.js";
+import { createAgentSocket } from "../ws/agent-socket.js";
 import chalk from "chalk";
 
-const PING_INTERVAL = 30_000;
 const RESPONSE_TIMEOUT = 30_000;
 
 export async function triggerCommand(
@@ -20,27 +18,25 @@ export async function triggerCommand(
     process.exit(1);
   }
 
-  // Resolve phrase
   let phrase = phraseArg;
   if (!phrase) {
     const input = await p.text({
       message: "Trigger phrase (e.g. 'play aquaprime')",
       validate: (val) => {
-        if (!val || !val.trim()) return "A trigger phrase is required";
+        if (!val?.trim()) return "A trigger phrase is required";
       },
     });
     handleCancel(input);
     phrase = (input as string).trim();
   }
 
-  // Resolve agent ID
   let agentId = opts.agent ?? getConfig().default_personality_id;
 
   if (!agentId) {
     const s = p.spinner();
     s.start("Fetching agents...");
     try {
-      const client = new ApiClient(apiKey);
+      const client = new ApiClient(apiKey, getApiBase());
       const agents = await client.getPersonalities();
       s.stop(`Found ${agents.length} agent(s).`);
 
@@ -68,126 +64,79 @@ export async function triggerCommand(
     }
   }
 
-  // Connect, send trigger, wait for response, disconnect
-  const wsUrl = `${WS_BASE}${ENDPOINTS.voiceStream(apiKey, agentId)}`;
   info(`Sending "${chalk.bold(phrase)}" to agent ${chalk.bold(agentId)}...`);
 
   const s = p.spinner();
   s.start("Waiting for response...");
 
-  await new Promise<void>((resolve) => {
-    const ws = new WebSocket(wsUrl, {
-      perMessageDeflate: false,
-      headers: {
-        Origin: "https://app.openhome.com",
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      },
-    });
+  let fullResponse = "";
+  let responseTimer: ReturnType<typeof setTimeout> | null = null;
+  let settled = false;
 
-    let fullResponse = "";
-    let responseTimer: ReturnType<typeof setTimeout> | null = null;
-    let pingInterval: ReturnType<typeof setInterval> | null = null;
+  const socket = createAgentSocket({
+    apiKey,
+    agentId,
+    baseUrl: getApiBase()
+      ?.replace("https://", "wss://")
+      .replace("http://", "ws://"),
 
-    function cleanup(): void {
-      if (pingInterval) clearInterval(pingInterval);
-      if (responseTimer) clearTimeout(responseTimer);
-      if (ws.readyState === WebSocket.OPEN) ws.close(1000);
-    }
+    onConnect() {
+      socket.send("transcribed", phrase);
 
-    ws.on("open", () => {
-      // Send trigger phrase immediately
-      ws.send(JSON.stringify({ type: "transcribed", data: phrase }));
-
-      // Keepalive
-      pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "ping" }));
-        }
-      }, PING_INTERVAL);
-
-      // Timeout if no response
       responseTimer = setTimeout(() => {
-        s.stop("Timed out waiting for response.");
-        if (fullResponse) {
-          console.log(`\n${chalk.cyan("Agent:")} ${fullResponse}`);
+        if (!settled) {
+          settled = true;
+          s.stop(fullResponse ? "Response received." : "Timed out.");
+          if (fullResponse)
+            console.log(`\n${chalk.cyan("Agent:")} ${fullResponse}\n`);
+          socket.close();
         }
-        cleanup();
-        resolve();
       }, RESPONSE_TIMEOUT);
-    });
+    },
 
-    ws.on("message", (raw: WebSocket.Data) => {
-      try {
-        const msg = JSON.parse(raw.toString()) as {
-          type: string;
-          data: unknown;
-        };
+    onTextMessage(content, role, { live, final }) {
+      if (role !== "assistant") return;
 
-        switch (msg.type) {
-          case "message": {
-            const data = msg.data as {
-              content?: string;
-              role?: string;
-              live?: boolean;
-              final?: boolean;
-            };
-            if (data.content && data.role === "assistant") {
-              fullResponse += data.content;
-              if (!data.live || data.final) {
-                // Got final response
-                s.stop("Response received.");
-                console.log(`\n${chalk.cyan("Agent:")} ${fullResponse}\n`);
-                cleanup();
-                resolve();
-              }
-            }
-            break;
-          }
-          case "text": {
-            const textData = msg.data as string;
-            if (textData === "audio-init") {
-              ws.send(JSON.stringify({ type: "text", data: "bot-speaking" }));
-            } else if (textData === "audio-end") {
-              ws.send(JSON.stringify({ type: "text", data: "bot-speak-end" }));
-              if (fullResponse) {
-                s.stop("Response received.");
-                console.log(`\n${chalk.cyan("Agent:")} ${fullResponse}\n`);
-                cleanup();
-                resolve();
-              }
-            }
-            break;
-          }
-          case "audio":
-            ws.send(JSON.stringify({ type: "ack", data: "audio-received" }));
-            break;
-          case "error-event": {
-            const errData = msg.data as { message?: string; title?: string };
-            s.stop("Error.");
-            error(
-              `Server error: ${errData?.message || errData?.title || "Unknown"}`,
-            );
-            cleanup();
-            resolve();
-            break;
-          }
+      if (!live || final) {
+        if (!settled) {
+          settled = true;
+          if (responseTimer) clearTimeout(responseTimer);
+          fullResponse = content;
+          s.stop("Response received.");
+          console.log(`\n${chalk.cyan("Agent:")} ${fullResponse}\n`);
+          socket.close();
         }
-      } catch {
-        // ignore
+      } else {
+        // accumulate streaming content
+        fullResponse = content;
       }
-    });
+    },
 
-    ws.on("error", (err: Error) => {
-      s.stop("Connection error.");
-      error(err.message);
-      resolve();
-    });
+    onEvent(type) {
+      // audio-end with content already accumulated — treat as final
+      if (type === "text" && fullResponse && !settled) {
+        settled = true;
+        if (responseTimer) clearTimeout(responseTimer);
+        s.stop("Response received.");
+        console.log(`\n${chalk.cyan("Agent:")} ${fullResponse}\n`);
+        socket.close();
+      }
+    },
 
-    ws.on("close", () => {
-      if (pingInterval) clearInterval(pingInterval);
+    onError(err) {
+      if (!settled) {
+        settled = true;
+        if (responseTimer) clearTimeout(responseTimer);
+        s.stop("Error.");
+        error(err.message);
+        socket.close();
+      }
+    },
+
+    onClose() {
       if (responseTimer) clearTimeout(responseTimer);
-      resolve();
-    });
+    },
   });
+
+  await socket.done;
 }

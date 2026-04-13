@@ -1,24 +1,9 @@
-import WebSocket from "ws";
-import { getApiKey, getConfig } from "../config/store.js";
+import { getApiKey, getConfig, getApiBase } from "../config/store.js";
 import { ApiClient } from "../api/client.js";
-import { WS_BASE, ENDPOINTS } from "../api/endpoints.js";
 import { error, success, info, p, handleCancel } from "../ui/format.js";
+import { createAgentSocket } from "../ws/agent-socket.js";
 import chalk from "chalk";
 import * as readline from "node:readline";
-
-interface WsMessage {
-  type: string;
-  data: unknown;
-}
-
-interface WsTextData {
-  content: string;
-  role: string;
-  live?: boolean;
-  final?: boolean;
-}
-
-const PING_INTERVAL = 30_000;
 
 export async function chatCommand(
   agentArg?: string,
@@ -32,16 +17,13 @@ export async function chatCommand(
     process.exit(1);
   }
 
-  // Resolve agent ID
   let agentId = agentArg ?? getConfig().default_personality_id;
 
   if (!agentId) {
-    // Fetch agents and let user pick
     const s = p.spinner();
     s.start("Fetching agents...");
-
     try {
-      const client = new ApiClient(apiKey);
+      const client = new ApiClient(apiKey, getApiBase());
       const agents = await client.getPersonalities();
       s.stop(`Found ${agents.length} agent(s).`);
 
@@ -69,77 +51,23 @@ export async function chatCommand(
     }
   }
 
-  // Connect WebSocket — wrap in a Promise so the menu waits for chat to end
-  const wsUrl = `${WS_BASE}${ENDPOINTS.voiceStream(apiKey, agentId)}`;
   info(`Connecting to agent ${chalk.bold(agentId)}...`);
 
-  await new Promise<void>((resolve) => {
-    const ws = new WebSocket(wsUrl, {
-      perMessageDeflate: false,
-      headers: {
-        Origin: "https://app.openhome.com",
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      },
-    });
+  let currentResponse = "";
 
-    let connected = false;
-    let currentResponse = "";
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
 
-    // Readline for user input
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
+  const socket = createAgentSocket({
+    apiKey,
+    agentId,
+    baseUrl: getApiBase()
+      ?.replace("https://", "wss://")
+      .replace("http://", "ws://"),
 
-    function promptUser(): void {
-      rl.question(chalk.green("You: "), (input) => {
-        const trimmed = input.trim();
-
-        if (!trimmed) {
-          promptUser();
-          return;
-        }
-
-        if (trimmed === "/quit" || trimmed === "/exit" || trimmed === "/q") {
-          info("Closing connection...");
-          ws.close(1000);
-          rl.close();
-          return;
-        }
-
-        if (!connected) {
-          error("Not connected yet. Please wait...");
-          promptUser();
-          return;
-        }
-
-        // Send text message to agent (same as useOpenHomeVoice.sendText)
-        ws.send(
-          JSON.stringify({
-            type: "transcribed",
-            data: trimmed,
-          }),
-        );
-
-        // Prompt again immediately for next input
-        promptUser();
-      });
-    }
-
-    // Keepalive ping every 30s (matches browser implementation)
-    let pingInterval: ReturnType<typeof setInterval> | null = null;
-
-    ws.on("open", () => {
-      connected = true;
-
-      // Keepalive ping — matches useOpenHomeVoice pattern
-      pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "ping" }));
-        }
-      }, PING_INTERVAL);
-
+    onConnect() {
       success("Connected! Type a message and press Enter. Type /quit to exit.");
       console.log(
         chalk.gray(
@@ -148,103 +76,48 @@ export async function chatCommand(
       );
       console.log("");
       promptUser();
-    });
+    },
 
-    ws.on("message", (raw: WebSocket.Data) => {
-      try {
-        const msg = JSON.parse(raw.toString()) as WsMessage;
+    onTextMessage(content, role, { live, final }) {
+      if (role !== "assistant") return;
 
-        switch (msg.type) {
-          case "message": {
-            const data = msg.data as WsTextData;
-            if (data.content && data.role === "assistant") {
-              if (data.live && !data.final) {
-                // Streaming — OpenHome sends the full accumulated text each time,
-                // not just the new token. Clear the line and rewrite.
-                const prefix = `${chalk.cyan("Agent:")} `;
-                readline.clearLine(process.stdout, 0);
-                readline.cursorTo(process.stdout, 0);
-                process.stdout.write(`${prefix}${data.content}`);
-                currentResponse = data.content;
-              } else {
-                // Final message
-                if (currentResponse !== "") {
-                  // End of stream — just add newline after the streamed line
-                  console.log("");
-                } else {
-                  // Non-streamed complete message
-                  console.log(`${chalk.cyan("Agent:")} ${data.content}`);
-                }
-                currentResponse = "";
-                console.log("");
-              }
-            }
-            break;
-          }
-          case "text": {
-            // Control messages from server
-            const textData = msg.data as string;
-            if (textData === "audio-init") {
-              // Server starting audio — tell it we're "playing"
-              ws.send(JSON.stringify({ type: "text", data: "bot-speaking" }));
-            } else if (textData === "audio-end") {
-              // Server done with audio — tell it we finished
-              ws.send(JSON.stringify({ type: "text", data: "bot-speak-end" }));
-              // If no text was streamed, show a note
-              if (currentResponse === "") {
-                console.log(
-                  chalk.gray("  (Agent sent audio — text-only mode)"),
-                );
-                console.log("");
-              }
-            }
-            break;
-          }
-          case "audio":
-            // Acknowledge audio receipt (protocol requirement)
-            ws.send(JSON.stringify({ type: "ack", data: "audio-received" }));
-            break;
-          case "error-event": {
-            const errData = msg.data as {
-              message?: string;
-              title?: string;
-              close_connection?: boolean;
-            };
-            const errMsg =
-              errData?.message || errData?.title || "Unknown error";
-            error(`Server error: ${errMsg}`);
-            break;
-          }
-          case "interrupt":
-            // Agent was interrupted
-            if (currentResponse !== "") {
-              console.log(""); // newline
-              currentResponse = "";
-            }
-            break;
-          case "action":
-          case "log":
-          case "question":
-          case "progress":
-            // Informational — ignore in CLI
-            break;
-          default:
-            break;
+      if (live && !final) {
+        // OpenHome sends full accumulated text each time — overwrite the line.
+        const prefix = `${chalk.cyan("Agent:")} `;
+        readline.clearLine(process.stdout, 0);
+        readline.cursorTo(process.stdout, 0);
+        process.stdout.write(`${prefix}${content}`);
+        currentResponse = content;
+      } else {
+        if (currentResponse !== "") {
+          console.log(""); // end the streamed line
+        } else {
+          console.log(`${chalk.cyan("Agent:")} ${content}`);
         }
-      } catch {
-        // Not JSON — ignore
+        currentResponse = "";
+        console.log("");
       }
-    });
+    },
 
-    ws.on("error", (err: Error) => {
+    onEvent(type) {
+      if (type === "interrupt" && currentResponse !== "") {
+        console.log("");
+        currentResponse = "";
+      }
+      if (type === "text") {
+        // audio-end with no streamed text — note it
+        if (currentResponse === "") {
+          // handled inline via onTextMessage; nothing extra needed
+        }
+      }
+    },
+
+    onError(err) {
       console.error("");
-      error(`WebSocket error: ${err.message}`);
-      rl.close();
-      resolve();
-    });
+      error(`Server error: ${err.message}`);
+    },
 
-    ws.on("close", (code: number) => {
-      if (pingInterval) clearInterval(pingInterval);
+    onClose(code) {
       console.log("");
       if (code === 1000) {
         info("Disconnected.");
@@ -252,14 +125,31 @@ export async function chatCommand(
         info(`Connection closed (code: ${code})`);
       }
       rl.close();
-      resolve();
-    });
-
-    // Handle Ctrl+C
-    rl.on("close", () => {
-      if (connected) {
-        ws.close(1000);
-      }
-    });
+    },
   });
+
+  function promptUser(): void {
+    rl.question(chalk.green("You: "), (input) => {
+      const trimmed = input.trim();
+
+      if (!trimmed) {
+        promptUser();
+        return;
+      }
+
+      if (trimmed === "/quit" || trimmed === "/exit" || trimmed === "/q") {
+        info("Closing connection...");
+        socket.close();
+        rl.close();
+        return;
+      }
+
+      socket.send("transcribed", trimmed);
+      promptUser();
+    });
+  }
+
+  rl.on("close", () => socket.close());
+
+  await socket.done;
 }

@@ -1,11 +1,8 @@
-import WebSocket from "ws";
-import { getApiKey, getConfig } from "../config/store.js";
+import { getApiKey, getConfig, getApiBase } from "../config/store.js";
 import { ApiClient } from "../api/client.js";
-import { WS_BASE, ENDPOINTS } from "../api/endpoints.js";
 import { error, success, info, p, handleCancel } from "../ui/format.js";
+import { createAgentSocket } from "../ws/agent-socket.js";
 import chalk from "chalk";
-
-const PING_INTERVAL = 30_000;
 
 export async function logsCommand(
   opts: { agent?: string } = {},
@@ -24,7 +21,7 @@ export async function logsCommand(
     const s = p.spinner();
     s.start("Fetching agents...");
     try {
-      const client = new ApiClient(apiKey);
+      const client = new ApiClient(apiKey, getApiBase());
       const agents = await client.getPersonalities();
       s.stop(`Found ${agents.length} agent(s).`);
 
@@ -52,123 +49,82 @@ export async function logsCommand(
     }
   }
 
-  const wsUrl = `${WS_BASE}${ENDPOINTS.voiceStream(apiKey, agentId)}`;
   info(`Streaming logs from agent ${chalk.bold(agentId)}...`);
   info(`Press ${chalk.bold("Ctrl+C")} to stop.\n`);
 
-  await new Promise<void>((resolve) => {
-    const ws = new WebSocket(wsUrl, {
-      perMessageDeflate: false,
-      headers: {
-        Origin: "https://app.openhome.com",
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-      },
-    });
+  const socket = createAgentSocket({
+    apiKey,
+    agentId,
+    baseUrl: getApiBase()
+      ?.replace("https://", "wss://")
+      .replace("http://", "ws://"),
 
-    let pingInterval: ReturnType<typeof setInterval> | null = null;
-
-    ws.on("open", () => {
+    onConnect() {
       success("Connected. Waiting for messages...\n");
+    },
 
-      pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "ping" }));
+    onEvent(type, data) {
+      const ts = chalk.gray(new Date().toLocaleTimeString());
+
+      switch (type) {
+        case "log":
+          console.log(`${ts} ${chalk.blue("[LOG]")} ${JSON.stringify(data)}`);
+          break;
+        case "action":
+          console.log(
+            `${ts} ${chalk.magenta("[ACTION]")} ${JSON.stringify(data)}`,
+          );
+          break;
+        case "progress":
+          console.log(
+            `${ts} ${chalk.yellow("[PROGRESS]")} ${JSON.stringify(data)}`,
+          );
+          break;
+        case "question":
+          console.log(
+            `${ts} ${chalk.cyan("[QUESTION]")} ${JSON.stringify(data)}`,
+          );
+          break;
+        case "message": {
+          const d = data as { content?: string; role?: string; live?: boolean };
+          if (d.content && !d.live) {
+            const role =
+              d.role === "assistant"
+                ? chalk.cyan("AGENT")
+                : chalk.green("USER");
+            console.log(`${ts} ${chalk.white(`[${role}]`)} ${d.content}`);
+          }
+          break;
         }
-      }, PING_INTERVAL);
-    });
-
-    ws.on("message", (raw: WebSocket.Data) => {
-      try {
-        const msg = JSON.parse(raw.toString()) as {
-          type: string;
-          data: unknown;
-        };
-        const ts = chalk.gray(new Date().toLocaleTimeString());
-
-        switch (msg.type) {
-          case "log":
-            console.log(
-              `${ts} ${chalk.blue("[LOG]")} ${JSON.stringify(msg.data)}`,
-            );
-            break;
-          case "action":
-            console.log(
-              `${ts} ${chalk.magenta("[ACTION]")} ${JSON.stringify(msg.data)}`,
-            );
-            break;
-          case "progress":
-            console.log(
-              `${ts} ${chalk.yellow("[PROGRESS]")} ${JSON.stringify(msg.data)}`,
-            );
-            break;
-          case "question":
-            console.log(
-              `${ts} ${chalk.cyan("[QUESTION]")} ${JSON.stringify(msg.data)}`,
-            );
-            break;
-          case "message": {
-            const data = msg.data as {
-              content?: string;
-              role?: string;
-              live?: boolean;
-            };
-            if (data.content && !data.live) {
-              const role =
-                data.role === "assistant"
-                  ? chalk.cyan("AGENT")
-                  : chalk.green("USER");
-              console.log(`${ts} ${chalk.white(`[${role}]`)} ${data.content}`);
-            }
-            break;
-          }
-          case "text": {
-            const textData = msg.data as string;
-            if (textData === "audio-init") {
-              ws.send(JSON.stringify({ type: "text", data: "bot-speaking" }));
-            } else if (textData === "audio-end") {
-              ws.send(JSON.stringify({ type: "text", data: "bot-speak-end" }));
-            }
-            break;
-          }
-          case "audio":
-            ws.send(JSON.stringify({ type: "ack", data: "audio-received" }));
-            break;
-          case "error-event": {
-            const errData = msg.data as { message?: string; title?: string };
-            console.log(
-              `${ts} ${chalk.red("[ERROR]")} ${errData?.message || errData?.title || JSON.stringify(msg.data)}`,
-            );
-            break;
-          }
-          default:
-            console.log(
-              `${ts} ${chalk.gray(`[${msg.type}]`)} ${JSON.stringify(msg.data)}`,
-            );
-            break;
+        case "error-event": {
+          const d = data as { message?: string; title?: string };
+          console.log(
+            `${ts} ${chalk.red("[ERROR]")} ${d?.message ?? d?.title ?? JSON.stringify(data)}`,
+          );
+          break;
         }
-      } catch {
-        // ignore non-JSON
+        default:
+          console.log(
+            `${ts} ${chalk.gray(`[${type}]`)} ${JSON.stringify(data)}`,
+          );
       }
-    });
+    },
 
-    ws.on("error", (err: Error) => {
+    onError(err) {
       error(`WebSocket error: ${err.message}`);
-      resolve();
-    });
+    },
 
-    ws.on("close", (code: number) => {
-      if (pingInterval) clearInterval(pingInterval);
+    onClose(code) {
       console.log("");
       info(`Connection closed (code: ${code})`);
-      resolve();
-    });
-
-    // Handle Ctrl+C
-    process.on("SIGINT", () => {
-      console.log("");
-      info("Stopping log stream...");
-      ws.close(1000);
-    });
+    },
   });
+
+  process.on("SIGINT", () => {
+    console.log("");
+    info("Stopping log stream...");
+    socket.close();
+  });
+
+  await socket.done;
 }
