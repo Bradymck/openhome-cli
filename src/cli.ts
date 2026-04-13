@@ -21,6 +21,7 @@ import { logsCommand } from "./commands/logs.js";
 import { setJwtCommand } from "./commands/set-jwt.js";
 import { validateCommand } from "./commands/validate.js";
 import { p, handleCancel } from "./ui/format.js";
+import { getConfig, saveConfig } from "./config/store.js";
 
 // Read version from package.json
 const __filename = fileURLToPath(import.meta.url);
@@ -36,17 +37,37 @@ try {
 }
 
 // ── Auto-update check ────────────────────────────────────────────
+const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // once per day
+
 async function checkForUpdates(): Promise<void> {
   // Skip if disabled, re-execing, or in JSON mode (would corrupt piped output)
   if (process.env.OPENHOME_NO_UPDATE === "1") return;
   if (process.argv.includes("--json")) return;
 
   try {
-    const res = await fetch("https://registry.npmjs.org/openhome-cli/latest", {
-      signal: AbortSignal.timeout(2000),
-    });
-    const data = (await res.json()) as { version?: string };
-    const latest = data.version;
+    // Use cached result if checked within the last 24h
+    const config = getConfig();
+    const lastCheck = config.last_version_check ?? 0;
+    const cached = config.latest_version_cache ?? null;
+    const now = Date.now();
+
+    let latest: string | undefined;
+
+    if (now - lastCheck < UPDATE_CHECK_INTERVAL && cached) {
+      latest = cached;
+    } else {
+      const res = await fetch(
+        "https://registry.npmjs.org/openhome-cli/latest",
+        { signal: AbortSignal.timeout(2000) },
+      );
+      const data = (await res.json()) as { version?: string };
+      latest = data.version;
+      if (latest && /^\d+\.\d+\.\d+$/.test(latest)) {
+        config.last_version_check = now;
+        config.latest_version_cache = latest;
+        saveConfig(config);
+      }
+    }
     // Validate semver format before using — guards against poisoned registry responses
     if (!latest || latest === version) return;
     if (!/^\d+\.\d+\.\d+$/.test(latest)) return;

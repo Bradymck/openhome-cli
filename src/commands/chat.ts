@@ -18,40 +18,48 @@ export async function chatCommand(
   }
 
   let agentId = agentArg ?? getConfig().default_personality_id;
+  let agentName: string | null = null;
 
-  if (!agentId) {
-    const s = p.spinner();
-    s.start("Fetching agents...");
-    try {
-      const client = new ApiClient(apiKey, getApiBase());
-      const agents = await client.getPersonalities();
-      s.stop(`Found ${agents.length} agent(s).`);
+  const client = new ApiClient(apiKey, getApiBase());
 
-      if (agents.length === 0) {
-        error("No agents found. Create one at https://app.openhome.com");
-        process.exit(1);
-      }
-
-      const selected = await p.select({
-        message: "Which agent do you want to chat with?",
-        options: agents.map((a) => ({
-          value: a.id,
-          label: a.name,
-          hint: a.id,
-        })),
-      });
-      handleCancel(selected);
-      agentId = selected as string;
-    } catch (err) {
-      s.stop("Failed.");
+  const s = p.spinner();
+  s.start("Fetching agents...");
+  let agents: { id: string; name: string }[] = [];
+  try {
+    agents = await client.getPersonalities();
+    s.stop(`Found ${agents.length} agent(s).`);
+  } catch (err) {
+    s.stop("Could not fetch agent list.");
+    if (!agentId) {
       error(
         `Could not fetch agents: ${err instanceof Error ? err.message : String(err)}`,
       );
       process.exit(1);
     }
+    // If we already have an agentId, continue without name
   }
 
-  info(`Connecting to agent ${chalk.bold(agentId)}...`);
+  if (!agentId) {
+    if (agents.length === 0) {
+      error("No agents found. Create one at https://app.openhome.com");
+      process.exit(1);
+    }
+
+    const selected = await p.select({
+      message: "Which agent do you want to chat with?",
+      options: agents.map((a) => ({
+        value: a.id,
+        label: a.name,
+        hint: a.id,
+      })),
+    });
+    handleCancel(selected);
+    agentId = selected as string;
+  }
+
+  agentName = agents.find((a) => a.id === agentId)?.name ?? null;
+
+  info(`Connecting to ${chalk.bold(agentName ?? agentId)}...`);
 
   let currentResponse = "";
 
@@ -81,18 +89,19 @@ export async function chatCommand(
     onTextMessage(content, role, { live, final }) {
       if (role !== "assistant") return;
 
+      const label = chalk.cyan(`${agentName ?? "Agent"}:`);
+
       if (live && !final) {
         // OpenHome sends full accumulated text each time — overwrite the line.
-        const prefix = `${chalk.cyan("Agent:")} `;
         readline.clearLine(process.stdout, 0);
         readline.cursorTo(process.stdout, 0);
-        process.stdout.write(`${prefix}${content}`);
+        process.stdout.write(`${label} ${content}`);
         currentResponse = content;
       } else {
         if (currentResponse !== "") {
           console.log(""); // end the streamed line
         } else {
-          console.log(`${chalk.cyan("Agent:")} ${content}`);
+          console.log(`${label} ${content}`);
         }
         currentResponse = "";
         console.log("");
