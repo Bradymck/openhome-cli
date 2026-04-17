@@ -1,10 +1,31 @@
 # OpenHome CLI
 
-Command-line tool for managing OpenHome voice AI abilities. Create and deploy abilities without leaving your terminal.
+Command-line tool for managing OpenHome voice AI abilities. Deploy, test, and manage abilities without leaving your terminal — and let AI agents do it for you.
 
 **Version:** v0.1.35
 **Node:** 18+
 **Platform:** macOS (primary), Linux/Windows (config-file fallback for keychain)
+
+---
+
+## Built for Humans and Agents
+
+Every command in this CLI works **fully non-interactively**. That means Claude Code, Claude agents, GitHub Actions, and any other automated context can deploy abilities, assign them to agents, and test them via `openhome chat` — no browser, no prompts, no human in the loop.
+
+```bash
+# Auth (one-time — or use env vars in CI, no disk writes needed)
+export OPENHOME_API_KEY=<your_api_key>
+export OPENHOME_JWT=<your_session_token>
+
+# Deploy, assign, and chat-test an ability — all scriptable
+openhome deploy ./my-ability.zip --name "weather-bot" --category skill --triggers "weather" --json
+openhome assign --agent "My Agent" --capabilities weather-bot --json
+openhome chat pers_abc123
+```
+
+When called with no TTY (pipes, CI, agents), `openhome` with no arguments prints a machine-readable command reference and exits — so agents always get structured output.
+
+**All commands support `--json`** for machine-readable output. **All prompts can be bypassed with flags.** Auth works via environment variables with no keychain access required.
 
 ---
 
@@ -21,7 +42,7 @@ openhome
 
 ---
 
-## Quick Start
+## Quick Start (Interactive)
 
 ```bash
 # 1. Log in with your API key
@@ -41,18 +62,18 @@ Or just run `openhome` with no arguments for the interactive menu.
 
 ---
 
-## CI / Non-interactive Usage
+## CI / Agent Usage
 
-When stdout is not a TTY (pipes, CI, agent contexts), `openhome` with no arguments prints a machine-readable command reference and exits. All commands work non-interactively when the required flags are supplied.
+All commands work non-interactively when the required flags are supplied.
 
-**Auth via environment variables (preferred for CI):**
+**Auth via environment variables (no disk writes, no keychain access):**
 
 ```bash
 export OPENHOME_API_KEY=<your_api_key>
 export OPENHOME_JWT=<your_session_token>
 ```
 
-**Typical CI workflow:**
+**Typical agent/CI workflow:**
 
 ```bash
 openhome deploy ./skill.zip --name "my-skill" --description "Does X" \
