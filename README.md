@@ -2,7 +2,7 @@
 
 Command-line tool for managing OpenHome voice AI abilities. Deploy, test, and manage abilities without leaving your terminal — and let AI agents do it for you.
 
-**Version:** v0.1.35
+**Version:** v0.1.37
 **Node:** 18+
 **Platform:** macOS (primary), Linux/Windows (config-file fallback for keychain)
 
@@ -26,6 +26,25 @@ openhome chat pers_abc123
 When called with no TTY (pipes, CI, agents), `openhome` with no arguments prints a machine-readable command reference and exits — so agents always get structured output.
 
 **All commands support `--json`** for machine-readable output. **All prompts can be bypassed with flags.** Auth works via environment variables with no keychain access required.
+
+---
+
+## Community & Resources
+
+| | |
+| --- | --- |
+| 🌐 **Website** | [openhome.com](https://openhome.com) |
+| 📖 **Docs** | [docs.openhome.com](https://docs.openhome.com) |
+| 💬 **Discord** | [discord.gg/gPpSCmuxWW](https://discord.gg/gPpSCmuxWW) |
+| 🐦 **X / Twitter** | [@openhome](https://x.com/openhome) |
+| 🐙 **GitHub** | [github.com/openhome-dev](https://github.com/openhome-dev) |
+| 📦 **Community Abilities** | [openhome-dev/abilities](https://github.com/openhome-dev/abilities/tree/dev/community) |
+
+### Sharing Your Abilities
+
+**Keep it private:** Deploy directly with `openhome deploy` — your code stays local, only the zip goes to OpenHome.
+
+**Open-source it:** Submit a PR to [openhome-dev/abilities](https://github.com/openhome-dev/abilities/tree/dev/community) on the `dev` branch. See the [contribution guide](https://github.com/openhome-dev/abilities/blob/dev/CONTRIBUTING.md) for the folder structure and checklist. Community abilities show up in the OpenHome ability library for anyone to use.
 
 ---
 
