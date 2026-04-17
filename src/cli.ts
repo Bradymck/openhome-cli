@@ -572,7 +572,7 @@ toggle   Enable or disable  [JWT required]
 
 agents   List agents and set default  [API key only]
   openhome agents [--json]
-  → returns id (numeric string e.g. "245524"), name. Use name or id interchangeably.
+  → returns id (numeric string e.g. "123456"), name. Use name or id interchangeably.
 
 assign   Link abilities to an agent  [JWT required]
   openhome assign --agent <agent_id|name> --capabilities <id1,id2,...> [--json]

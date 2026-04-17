@@ -182,7 +182,7 @@ openhome deploy ./my-ability.zip \
   --triggers "check weather,whats the weather"
 
 # Attach to specific agent (use numeric agent ID from `openhome agents --json`)
-openhome deploy ./my-ability.zip --personality 245524
+openhome deploy ./my-ability.zip --personality <agent_id>
 ```
 
 | Flag | What it does |
@@ -337,7 +337,7 @@ Edit an agent's name and system prompt in `$EDITOR`.
 openhome agents edit
 
 # Specific agent by name or numeric ID (use `openhome agents --json` to find IDs)
-openhome agents edit 245524
+openhome agents edit <agent_id>
 ```
 
 Opens your `$VISUAL` or `$EDITOR` (falls back to `nano`) with the current prompt pre-loaded. Saves on exit.
@@ -350,7 +350,7 @@ Chat with an agent via WebSocket. Send text messages and trigger abilities with 
 
 ```bash
 openhome chat
-openhome chat 245524
+openhome chat <agent_id>
 ```
 
 Commands inside chat: `/quit`, `/exit`, or `/q` to disconnect. Ctrl+C also works.
@@ -365,7 +365,7 @@ Send a trigger phrase to fire an ability remotely.
 
 ```bash
 openhome trigger "play aquaprime"
-openhome trigger --agent 245524 "check weather"
+openhome trigger --agent <agent_id> "check weather"
 ```
 
 ---
