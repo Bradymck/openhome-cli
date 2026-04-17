@@ -2,7 +2,7 @@
 
 Command-line tool for managing OpenHome voice AI abilities. Deploy, test, and manage abilities without leaving your terminal — and let AI agents do it for you.
 
-**Version:** v0.1.38
+**Version:** v0.1.39
 **Node:** 18+
 **Platform:** macOS (primary), Linux/Windows (config-file fallback for keychain)
 
