@@ -35,6 +35,7 @@ When called with no TTY (pipes, CI, agents), `openhome` with no arguments prints
 | --- | --- |
 | 🌐 **Website** | [openhome.com](https://openhome.com) |
 | 📖 **Docs** | [docs.openhome.com](https://docs.openhome.com) |
+| 🤖 **Dev Kit** | [dev.openhome.com](https://dev.openhome.com) — hardware waitlist, but you can build abilities today |
 | 💬 **Discord** | [discord.gg/gPpSCmuxWW](https://discord.gg/gPpSCmuxWW) |
 | 🐦 **X / Twitter** | [@openhome](https://x.com/openhome) |
 | 🐙 **GitHub** | [github.com/openhome-dev](https://github.com/openhome-dev) |
