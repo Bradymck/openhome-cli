@@ -2,7 +2,7 @@
 
 Command-line tool for managing OpenHome voice AI abilities. Deploy, test, and manage abilities without leaving your terminal — and let AI agents do it for you.
 
-**Version:** v0.1.37
+**Version:** v0.1.38
 **Node:** 18+
 **Platform:** macOS (primary), Linux/Windows (config-file fallback for keychain)
 
@@ -68,8 +68,9 @@ openhome
 # 1. Log in with your API key
 openhome login
 
-# 2. Deploy an ability zip
-openhome deploy ./my-ability
+# 2. Zip your ability folder, then deploy
+cd path/to/my-ability && zip -r ../my-ability.zip . && cd ..
+openhome deploy ./my-ability.zip
 
 # 3. Assign to an agent
 openhome assign
@@ -165,14 +166,13 @@ The token is saved to macOS Keychain (or `~/.openhome/config.json` fallback). Yo
 
 ### `openhome deploy [path]`
 
-Validate, zip, and upload an ability to OpenHome.
+Validate and upload an ability zip to OpenHome.
+
+> **You must zip your ability first.** The CLI does not auto-zip directories. Run `zip -r my-ability.zip my-ability/` from the parent directory before deploying.
 
 ```bash
-# Deploy from current directory
-openhome deploy
-
-# Deploy specific ability
-openhome deploy ./my-ability
+# Deploy a zip from current directory (must already be zipped)
+openhome deploy ./my-ability.zip
 
 # Non-interactive
 openhome deploy ./my-ability.zip \
@@ -181,8 +181,8 @@ openhome deploy ./my-ability.zip \
   --category skill \
   --triggers "check weather,whats the weather"
 
-# Attach to specific agent
-openhome deploy ./my-ability --personality pers_alice
+# Attach to specific agent (use numeric agent ID from `openhome agents --json`)
+openhome deploy ./my-ability.zip --personality 245524
 ```
 
 | Flag | What it does |
@@ -197,10 +197,10 @@ openhome deploy ./my-ability --personality pers_alice
 | `--json` | Machine-readable JSON output |
 
 **What happens on deploy:**
-1. Validates ability (blocks if errors)
-2. Creates ZIP (excludes `__pycache__`, `.pyc`, `.git`)
-3. Asks for confirmation (skipped when non-interactive flags provided)
-4. Uploads to OpenHome
+
+1. Validates the zip contents (blocks if errors)
+2. Asks for confirmation (skipped when non-interactive flags provided)
+3. Uploads to OpenHome
 
 > **Note:** There is no update/overwrite endpoint yet. Re-deploying with the same name will fail with a naming conflict. Delete the old version first with `openhome delete`.
 
@@ -219,6 +219,10 @@ openhome validate ./my-ability
 ```
 
 Prints all errors (which would block deploy) and warnings (which would not).
+
+| Flag     | What it does                 |
+|----------|------------------------------|
+| `--json` | Machine-readable JSON output |
 
 ---
 
@@ -269,6 +273,8 @@ openhome delete my-weather-bot --yes
 ### `openhome toggle [ability]`
 
 Enable or disable a deployed ability.
+
+> **Note:** This command is not yet implemented server-side and will return a NOT_IMPLEMENTED error. It is documented here for when the endpoint ships.
 
 ```bash
 openhome toggle
@@ -330,8 +336,8 @@ Edit an agent's name and system prompt in `$EDITOR`.
 # Interactive
 openhome agents edit
 
-# Specific agent by name or ID
-openhome agents edit pers_abc123
+# Specific agent by name or numeric ID (use `openhome agents --json` to find IDs)
+openhome agents edit 245524
 ```
 
 Opens your `$VISUAL` or `$EDITOR` (falls back to `nano`) with the current prompt pre-loaded. Saves on exit.
@@ -344,7 +350,7 @@ Chat with an agent via WebSocket. Send text messages and trigger abilities with 
 
 ```bash
 openhome chat
-openhome chat pers_abc123
+openhome chat 245524
 ```
 
 Commands inside chat: `/quit`, `/exit`, or `/q` to disconnect. Ctrl+C also works.
@@ -359,7 +365,7 @@ Send a trigger phrase to fire an ability remotely.
 
 ```bash
 openhome trigger "play aquaprime"
-openhome trigger --agent pers_abc123 "check weather"
+openhome trigger --agent 245524 "check weather"
 ```
 
 ---
@@ -556,7 +562,7 @@ The CLI checks npm once per day for a newer version (result cached — no networ
 | `deploy` | `POST /api/capabilities/add-capability/` | API key | Live |
 | `list` | `GET /api/capabilities/get-installed-capabilities/` | JWT | Live |
 | `delete` | `POST /api/capabilities/delete-capability/` | JWT | Live |
-| `toggle` | `PUT /api/capabilities/edit-installed-capability/:id/` | JWT | Live |
+| `toggle` | `PUT /api/capabilities/edit-installed-capability/:id/` | JWT | Not implemented |
 | `assign` | `PUT /api/personalities/edit-personality/` | JWT | Live |
 
 Commands marked **JWT** require `openhome set-jwt` first.
