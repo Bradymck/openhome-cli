@@ -656,7 +656,7 @@ On exit code 2, the JSON error response includes:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 - Ability IDs are numeric (e.g. 3501); names also accepted everywhere
-- Agent IDs are UUIDs; names also work in --agent flags
+- Agent IDs are numeric strings (e.g. "123456"); names also work in --agent flags
 - JWT stored in macOS Keychain — survives reboots, no re-login each session
 - agents edit command opens \\$EDITOR — interactive only, requires a human`);
       process.exit(0);
