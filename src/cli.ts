@@ -6,7 +6,6 @@ import { readFileSync } from "node:fs";
 import { loginCommand } from "./commands/login.js";
 import { deployCommand } from "./commands/deploy.js";
 import { deleteCommand } from "./commands/delete.js";
-import { toggleCommand } from "./commands/toggle.js";
 import { assignCommand } from "./commands/assign.js";
 import { listCommand } from "./commands/list.js";
 import { statusCommand } from "./commands/status.js";
@@ -21,7 +20,8 @@ import { logsCommand } from "./commands/logs.js";
 import { setJwtCommand } from "./commands/set-jwt.js";
 import { validateCommand } from "./commands/validate.js";
 import { p, handleCancel } from "./ui/format.js";
-import { getConfig, saveConfig } from "./config/store.js";
+import { getConfig, saveConfig, getJwt, getJwtStatus } from "./config/store.js";
+import chalk from "chalk";
 
 // Read version from package.json
 const __filename = fileURLToPath(import.meta.url);
@@ -121,11 +121,46 @@ async function ensureLoggedIn(): Promise<void> {
   }
 }
 
+async function checkJwtExpiry(): Promise<void> {
+  const jwt = getJwt();
+  if (!jwt) return;
+  const status = getJwtStatus(jwt);
+  if (status === "expiring_soon") {
+    p.note(
+      [
+        "Your session token expires soon. Refresh it now to avoid interruptions:",
+        "  1. Finish any work in the OpenHome web app first",
+        "  2. Go to app.openhome.com → browser console (Cmd+Option+J / F12)",
+        "  3. Run: copy(localStorage.getItem('access_token'))",
+        '  4. Choose "🔑 Refresh Token" from the menu below, or run: openhome set-jwt <token>',
+      ].join("\n"),
+      chalk.yellow("⚠  Session token expiring soon"),
+    );
+  } else if (status === "expired") {
+    p.note(
+      [
+        "Your session token has expired. List, delete, assign, and status commands will fail.",
+        "Refresh it now:",
+        "  1. Finish any work in the OpenHome web app first",
+        "  2. Go to app.openhome.com → browser console (Cmd+Option+J / F12)",
+        "  3. Run: copy(localStorage.getItem('access_token'))",
+        '  4. Choose "🔑 Refresh Token" from the menu below, or run: openhome set-jwt <token>',
+        "",
+        "JWT tokens expire roughly every 7 days and are also invalidated when you open the web app.",
+      ].join("\n"),
+      chalk.red("✗  Session token expired"),
+    );
+  }
+}
+
 async function interactiveMenu(): Promise<void> {
   p.intro(`🏠 OpenHome CLI v${version}`);
 
   // Login first if not authenticated
   await ensureLoggedIn();
+
+  // Warn if JWT is expiring or expired
+  await checkJwtExpiry();
 
   let running = true;
   while (running) {
@@ -146,11 +181,6 @@ async function interactiveMenu(): Promise<void> {
           value: "delete",
           label: "🗑️   Delete Ability",
           hint: "Remove a deployed ability",
-        },
-        {
-          value: "toggle",
-          label: "⚡  Enable / Disable",
-          hint: "Toggle an ability on or off",
         },
         {
           value: "assign",
@@ -196,9 +226,6 @@ async function interactiveMenu(): Promise<void> {
         break;
       case "delete":
         await deleteCommand();
-        break;
-      case "toggle":
-        await toggleCommand();
         break;
       case "assign":
         await assignCommand();
@@ -333,27 +360,6 @@ program
   );
 
 program
-  .command("toggle [ability]")
-  .description("Enable or disable a deployed ability")
-  .option("--enable", "Enable the ability")
-  .option("--disable", "Disable the ability")
-  .option("--json", "Output machine-readable JSON")
-  .option("--mock", "Use mock API client")
-  .action(
-    async (
-      ability: string | undefined,
-      opts: {
-        mock?: boolean;
-        enable?: boolean;
-        disable?: boolean;
-        json?: boolean;
-      },
-    ) => {
-      await toggleCommand(ability, opts);
-    },
-  );
-
-program
   .command("assign")
   .description("Assign abilities to an agent")
   .option("--agent <id>", "Agent ID or name (skips prompt)")
@@ -438,7 +444,7 @@ program
 program
   .command("set-jwt [token]")
   .description(
-    "Save a session JWT token (required for list, delete, toggle, assign, status)",
+    "Save a session JWT token (required for list, delete, assign, status)",
   )
   .action(async (token?: string) => {
     await setJwtCommand(token);
@@ -494,7 +500,7 @@ BEFORE running any JWT-required command, check first:
   → jwt_status: "expiring_soon" = warn the human, proceed
   → jwt_status: "expired" | "missing" = STOP, ask human to refresh
 
-Commands that need JWT:  list, delete, toggle, assign, status
+Commands that need JWT:  list, delete, assign, status
 Commands that need only API key:  deploy, agents, chat, trigger, logs, validate, whoami
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -561,12 +567,6 @@ status   Detailed info for one ability  [JWT required]
 delete   Delete by ID or name  [JWT required]
   openhome delete <id|name> --yes [--json]
   --yes skips confirmation prompt (required for non-interactive use)
-
-toggle   Enable or disable  [JWT required]
-  openhome toggle <id|name> --enable [--json]
-  openhome toggle <id|name> --disable [--json]
-  NOTE: toggle endpoint is not yet implemented server-side — returns NOT_IMPLEMENTED.
-  Use the OpenHome web dashboard to enable/disable abilities for now.
 
 ── Agent management ────────────────────────────────────────────────
 

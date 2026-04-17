@@ -2,7 +2,7 @@
 
 Command-line tool for managing OpenHome voice AI abilities. Deploy, test, and manage abilities without leaving your terminal — and let AI agents do it for you.
 
-**Version:** v0.1.39
+**Version:** v0.1.40
 **Node:** 18+
 **Platform:** macOS (primary), Linux/Windows (config-file fallback for keychain)
 
@@ -148,7 +148,7 @@ openhome login --key <API_KEY> --jwt <SESSION_TOKEN>
 
 ### `openhome set-jwt [token]`
 
-Save a session token to unlock management commands (`list`, `delete`, `toggle`, `assign`).
+Save a session token to unlock management commands (`list`, `delete`, `assign`, `status`).
 
 ```bash
 # Guided flow — opens browser and walks you through copying the token
@@ -265,27 +265,6 @@ openhome delete my-weather-bot --yes
 | Flag | What it does |
 |------|-------------|
 | `--yes` | Skip confirmation prompt |
-| `--json` | Machine-readable JSON output |
-| `--mock` | Use fake API client |
-
----
-
-### `openhome toggle [ability]`
-
-Enable or disable a deployed ability.
-
-> **Note:** This command is not yet implemented server-side and will return a NOT_IMPLEMENTED error. It is documented here for when the endpoint ships.
-
-```bash
-openhome toggle
-openhome toggle my-weather-bot --enable
-openhome toggle my-weather-bot --disable
-```
-
-| Flag | What it does |
-|------|-------------|
-| `--enable` | Enable the ability |
-| `--disable` | Disable the ability |
 | `--json` | Machine-readable JSON output |
 | `--mock` | Use fake API client |
 
@@ -562,7 +541,6 @@ The CLI checks npm once per day for a newer version (result cached — no networ
 | `deploy` | `POST /api/capabilities/add-capability/` | API key | Live |
 | `list` | `GET /api/capabilities/get-installed-capabilities/` | JWT | Live |
 | `delete` | `POST /api/capabilities/delete-capability/` | JWT | Live |
-| `toggle` | `PUT /api/capabilities/edit-installed-capability/:id/` | JWT | Not implemented |
 | `assign` | `PUT /api/personalities/edit-personality/` | JWT | Live |
 
 Commands marked **JWT** require `openhome set-jwt` first.
