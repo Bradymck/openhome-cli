@@ -3,6 +3,7 @@ import { handleIfSessionExpired } from "./handle-session-expired.js";
 import { MockApiClient } from "../api/mock-client.js";
 import { getApiKey, getApiBase, getJwt } from "../config/store.js";
 import { error, info, table, p, jsonOut, jsonError } from "../ui/format.js";
+import { NO_API_KEY_MSG, NO_JWT_MSG } from "./auth-messages.js";
 import type { TableRow } from "../ui/format.js";
 import chalk from "chalk";
 
@@ -34,22 +35,12 @@ export async function listCommand(
     const apiKey = getApiKey() ?? "";
     const jwt = getJwt() ?? undefined;
     if (!apiKey && !jwt) {
-      if (opts.json)
-        jsonError(
-          "UNAUTHENTICATED",
-          "Not authenticated. Set OPENHOME_API_KEY and OPENHOME_JWT env vars.",
-          2,
-        );
+      if (opts.json) jsonError("UNAUTHENTICATED", NO_API_KEY_MSG, 2);
       error("Not authenticated. Run: openhome login");
       process.exit(1);
     }
     if (!jwt) {
-      if (opts.json)
-        jsonError(
-          "NO_JWT",
-          "Session token required. Set OPENHOME_JWT env var or run: openhome set-jwt <token>",
-          2,
-        );
+      if (opts.json) jsonError("NO_JWT", NO_JWT_MSG, 2);
       error("Session token required. Run: openhome set-jwt <token>");
       process.exit(1);
     }

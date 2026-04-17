@@ -1,6 +1,7 @@
 import { SessionExpiredError } from "../api/client.js";
 import { setupJwt } from "./login.js";
 import { jsonOut, p } from "../ui/format.js";
+import { SESSION_EXPIRED_MSG } from "./auth-messages.js";
 import chalk from "chalk";
 
 const REAUTH_HINT = [
@@ -29,8 +30,7 @@ export async function handleIfSessionExpired(
       ok: false,
       error: {
         code: "SESSION_EXPIRED",
-        message:
-          "JWT expired. Set a fresh token: export OPENHOME_JWT=<token>  or run: openhome set-jwt <token>",
+        message: SESSION_EXPIRED_MSG,
       },
     });
     process.exit(2); // exit 2 = auth error, needs human intervention

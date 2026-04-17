@@ -9,6 +9,7 @@ import {
   getJwt,
   getTrackedAbilities,
 } from "../config/store.js";
+import { NO_API_KEY_MSG } from "./auth-messages.js";
 import {
   error,
   info,
@@ -120,12 +121,7 @@ export async function statusCommand(
     const apiKey = getApiKey() ?? "";
     const jwt = getJwt() ?? undefined;
     if (!apiKey && !jwt) {
-      if (opts.json)
-        jsonError(
-          "UNAUTHENTICATED",
-          "Not authenticated. Set OPENHOME_API_KEY and OPENHOME_JWT env vars.",
-          2,
-        );
+      if (opts.json) jsonError("UNAUTHENTICATED", NO_API_KEY_MSG, 2);
       error("Not authenticated. Run: openhome login");
       process.exit(1);
     }

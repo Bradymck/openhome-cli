@@ -5,6 +5,7 @@ import { ApiClient } from "../api/client.js";
 import { handleIfSessionExpired } from "./handle-session-expired.js";
 import { MockApiClient } from "../api/mock-client.js";
 import { getApiKey, getApiBase, getConfig, getJwt } from "../config/store.js";
+import { NO_API_KEY_MSG } from "./auth-messages.js";
 import type {
   AbilityCategory,
   UploadAbilityMetadata,
@@ -262,12 +263,7 @@ export async function deployCommand(
   const apiKey = getApiKey() ?? "";
   const jwt = getJwt() ?? undefined;
   if (!apiKey) {
-    if (opts.json)
-      jsonError(
-        "UNAUTHENTICATED",
-        "Not authenticated. Set OPENHOME_API_KEY env var.",
-        2,
-      );
+    if (opts.json) jsonError("UNAUTHENTICATED", NO_API_KEY_MSG, 2);
     error("Not authenticated. Run: openhome login");
     process.exit(1);
   }
