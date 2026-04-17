@@ -2,7 +2,7 @@
 
 Command-line tool for managing OpenHome voice AI abilities. Create and deploy abilities without leaving your terminal.
 
-**Version:** v0.1.2
+**Version:** v0.1.35
 **Node:** 18+
 **Platform:** macOS (primary), Linux/Windows (config-file fallback for keychain)
 
@@ -27,16 +27,48 @@ openhome
 # 1. Log in with your API key
 openhome login
 
-# 2. Create a new ability
-openhome init my-ability
-
-# 3. Edit main.py in your editor
-
-# 4. Deploy
+# 2. Deploy an ability zip
 openhome deploy ./my-ability
+
+# 3. Assign to an agent
+openhome assign
+
+# 4. Chat to test it
+openhome chat
 ```
 
 Or just run `openhome` with no arguments for the interactive menu.
+
+---
+
+## CI / Non-interactive Usage
+
+When stdout is not a TTY (pipes, CI, agent contexts), `openhome` with no arguments prints a machine-readable command reference and exits. All commands work non-interactively when the required flags are supplied.
+
+**Auth via environment variables (preferred for CI):**
+
+```bash
+export OPENHOME_API_KEY=<your_api_key>
+export OPENHOME_JWT=<your_session_token>
+```
+
+**Typical CI workflow:**
+
+```bash
+openhome deploy ./skill.zip --name "my-skill" --description "Does X" \
+  --category skill --triggers "activate" --json
+openhome list --json
+openhome assign --agent "My Agent" --capabilities <id_from_list> --json
+openhome delete <id> --yes --json
+```
+
+**Exit codes:**
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | Error |
+| `2` | Auth error (expired JWT, invalid key) |
 
 ---
 
@@ -44,11 +76,9 @@ Or just run `openhome` with no arguments for the interactive menu.
 
 ### `openhome` (no arguments)
 
-Opens an interactive menu. Use arrow keys to navigate, Enter to select. The menu loops after each command — pick another or choose Exit.
+Opens an interactive menu. Use arrow keys to navigate, Enter to select. The menu loops after each command.
 
 If you are not logged in, the CLI prompts for login before showing the menu.
-
-All commands below also work directly from the terminal.
 
 ---
 
@@ -62,7 +92,15 @@ Authenticate with your OpenHome API key.
 
 ```bash
 openhome login
+
+# Non-interactive (skips all prompts)
+openhome login --key <API_KEY> --jwt <SESSION_TOKEN>
 ```
+
+| Flag | What it does |
+|------|-------------|
+| `--key <api_key>` | API key (skips prompt) |
+| `--jwt <token>` | Session token (skips browser setup step) |
 
 ---
 
@@ -71,43 +109,16 @@ openhome login
 Save a session token to unlock management commands (`list`, `delete`, `toggle`, `assign`).
 
 ```bash
+# Guided flow — opens browser and walks you through copying the token
+openhome set-jwt
+
+# Direct — paste the token
 openhome set-jwt eyJ...
 ```
 
-These management commands use OpenHome's web session API, which requires a JWT rather than the SDK API key. To get your token: open [app.openhome.com](https://app.openhome.com), open DevTools then Application then Local Storage then `token`, copy the value, and run `openhome set-jwt <token>`.
+**Guided flow:** Opens `app.openhome.com`, then walks you through the browser console steps to copy your session token to clipboard.
 
-The token is saved to `~/.openhome/config.json`. You only need to do this once (until your session expires).
-
----
-
-### `openhome init [name]`
-
-Scaffold a new ability with all required files.
-
-```bash
-# Interactive (prompts for name)
-openhome init
-
-# Direct
-openhome init my-weather-bot
-```
-
-**Prompts:**
-1. **Name** — lowercase, numbers, hyphens only (e.g. `my-ability`)
-2. **Ability type** — Skill (user-triggered), Brain Skill (auto-triggered), or Background Daemon
-3. **Template** — Basic (speak + response) or API (external API with secrets)
-4. **Trigger words** — comma-separated phrases that activate the ability
-
-**Generated files:**
-
-| File | Purpose |
-|------|---------|
-| `main.py` | Your ability code (Python) |
-| `config.json` | Name + trigger words |
-| `__init__.py` | Required by OpenHome (empty) |
-| `README.md` | Description of your ability |
-
-The generated code auto-validates after creation. You're prompted to deploy immediately.
+The token is saved to macOS Keychain (or `~/.openhome/config.json` fallback). You only need to do this once (until your session expires).
 
 ---
 
@@ -122,11 +133,12 @@ openhome deploy
 # Deploy specific ability
 openhome deploy ./my-ability
 
-# Preview without uploading
-openhome deploy ./my-ability --dry-run
-
-# Test with fake API
-openhome deploy ./my-ability --mock
+# Non-interactive
+openhome deploy ./my-ability.zip \
+  --name "Weather Bot" \
+  --description "Checks the weather" \
+  --category skill \
+  --triggers "check weather,whats the weather"
 
 # Attach to specific agent
 openhome deploy ./my-ability --personality pers_alice
@@ -134,17 +146,38 @@ openhome deploy ./my-ability --personality pers_alice
 
 | Flag | What it does |
 |------|-------------|
-| `--dry-run` | Show what would deploy. No zip, no upload. |
-| `--mock` | Use fake API responses for testing |
+| `--name <name>` | Ability name (skips prompt) |
+| `--description <desc>` | Description (skips prompt) |
+| `--category <cat>` | `skill` \| `brain_skill` \| `background_daemon` \| `local` |
+| `--triggers <words>` | Comma-separated trigger words (skips prompt) |
 | `--personality <id>` | Override default agent for this deploy |
+| `--timeout <seconds>` | Upload timeout (default: 120) |
+| `--mock` | Use fake API responses for testing |
+| `--json` | Machine-readable JSON output |
 
 **What happens on deploy:**
 1. Validates ability (blocks if errors)
 2. Creates ZIP (excludes `__pycache__`, `.pyc`, `.git`)
-3. Asks for confirmation
+3. Asks for confirmation (skipped when non-interactive flags provided)
 4. Uploads to OpenHome
 
 > **Note:** There is no update/overwrite endpoint yet. Re-deploying with the same name will fail with a naming conflict. Delete the old version first with `openhome delete`.
+
+---
+
+### `openhome validate [path]`
+
+Run validation checks on an ability directory without deploying. Same checks `deploy` runs internally.
+
+```bash
+# Validate current directory
+openhome validate
+
+# Validate specific directory
+openhome validate ./my-ability
+```
+
+Prints all errors (which would block deploy) and warnings (which would not).
 
 ---
 
@@ -154,8 +187,7 @@ List all your deployed abilities.
 
 ```bash
 openhome list
-
-# Test with fake data
+openhome list --json
 openhome list --mock
 ```
 
@@ -163,7 +195,10 @@ Shows a table with name, version, status, and last update date.
 
 Status colors: green = active, yellow = processing, red = failed, gray = disabled.
 
-> **Requires session token.** Run `openhome set-jwt <token>` first. See [set-jwt](#openhome-set-jwt-token) above.
+| Flag | What it does |
+|------|-------------|
+| `--json` | Machine-readable JSON output |
+| `--mock` | Use fake API client |
 
 ---
 
@@ -172,19 +207,21 @@ Status colors: green = active, yellow = processing, red = failed, gray = disable
 Delete a deployed ability.
 
 ```bash
-# Pick from a list interactively
+# Interactive
 openhome delete
 
-# Delete by name directly
+# By name
 openhome delete my-weather-bot
 
-# Test with fake data
-openhome delete --mock
+# Skip confirmation (useful for CI)
+openhome delete my-weather-bot --yes
 ```
 
-Prompts for confirmation before deleting.
-
-> **Requires session token.** Run `openhome set-jwt <token>` first.
+| Flag | What it does |
+|------|-------------|
+| `--yes` | Skip confirmation prompt |
+| `--json` | Machine-readable JSON output |
+| `--mock` | Use fake API client |
 
 ---
 
@@ -193,10 +230,7 @@ Prompts for confirmation before deleting.
 Enable or disable a deployed ability.
 
 ```bash
-# Interactive
 openhome toggle
-
-# By name with flag
 openhome toggle my-weather-bot --enable
 openhome toggle my-weather-bot --disable
 ```
@@ -205,22 +239,29 @@ openhome toggle my-weather-bot --disable
 |------|-------------|
 | `--enable` | Enable the ability |
 | `--disable` | Disable the ability |
-
-> **Requires session token.** Run `openhome set-jwt <token>` first.
+| `--json` | Machine-readable JSON output |
+| `--mock` | Use fake API client |
 
 ---
 
 ### `openhome assign`
 
-Assign abilities to an agent (multiselect).
+Assign abilities to an agent.
 
 ```bash
+# Interactive multiselect
 openhome assign
+
+# Non-interactive (IDs or names accepted)
+openhome assign --agent "My Agent" --capabilities id1,id2
 ```
 
-Fetches your agents and abilities, lets you pick an agent, then multiselect which abilities to assign to it.
-
-> **Requires session token.** Run `openhome set-jwt <token>` first.
+| Flag | What it does |
+|------|-------------|
+| `--agent <id\|name>` | Agent ID or name (skips prompt) |
+| `--capabilities <ids>` | Comma-separated ability IDs or names (skips prompt) |
+| `--json` | Machine-readable JSON output |
+| `--mock` | Use fake API client |
 
 ---
 
@@ -230,9 +271,29 @@ View your agents and set a default for deploys.
 
 ```bash
 openhome agents
+openhome agents --json
 ```
 
-Shows all agents on your account with names and IDs. Optionally set or change your default agent (used by `deploy` when `--personality` is not specified).
+Shows all agents with names and IDs. Optionally set or change your default agent (used by `deploy` when `--personality` is not specified).
+
+| Flag | What it does |
+|------|-------------|
+| `--json` | Machine-readable JSON output |
+| `--mock` | Use fake API client |
+
+#### `openhome agents edit [agent]`
+
+Edit an agent's name and system prompt in `$EDITOR`.
+
+```bash
+# Interactive
+openhome agents edit
+
+# Specific agent by name or ID
+openhome agents edit pers_abc123
+```
+
+Opens your `$VISUAL` or `$EDITOR` (falls back to `nano`) with the current prompt pre-loaded. Saves on exit.
 
 ---
 
@@ -241,18 +302,13 @@ Shows all agents on your account with names and IDs. Optionally set or change yo
 Chat with an agent via WebSocket. Send text messages and trigger abilities with keywords.
 
 ```bash
-# Pick an agent interactively
 openhome chat
-
-# Chat with a specific agent
 openhome chat pers_abc123
 ```
 
-Once connected, type messages and press Enter. The agent responds in real-time.
-
 Commands inside chat: `/quit`, `/exit`, or `/q` to disconnect. Ctrl+C also works.
 
-> **Note:** Audio responses from the agent are not playable in the terminal. Text responses display normally.
+> **Note:** Audio responses are not playable in the terminal. Text responses display normally.
 
 ---
 
@@ -272,17 +328,15 @@ openhome trigger --agent pers_abc123 "check weather"
 Show detailed info for one ability.
 
 ```bash
-# By name
 openhome status my-weather-bot
-
-# Read name from local config.json
-openhome status
-
-# Test with fake data
-openhome status my-weather-bot --mock
+openhome status                      # reads name from local config.json
+openhome status my-weather-bot --json
 ```
 
-> **Requires session token** (uses the same list endpoint internally). Run `openhome set-jwt <token>` first.
+| Flag | What it does |
+|------|-------------|
+| `--json` | Machine-readable JSON output |
+| `--mock` | Use fake API client |
 
 ---
 
@@ -303,6 +357,7 @@ Show auth status, default agent, and tracked abilities.
 
 ```bash
 openhome whoami
+openhome whoami --json    # includes jwt_status: valid | expiring_soon | expired | missing
 ```
 
 ---
@@ -315,6 +370,18 @@ Edit trigger words, description, or category in a local `config.json`.
 openhome config
 openhome config ./my-ability
 ```
+
+---
+
+### `openhome mcp`
+
+Start the OpenHome MCP voice server for Claude Code integration.
+
+```bash
+openhome mcp
+```
+
+Launches the OpenHome voice server as an MCP (Model Context Protocol) server for use with Claude Code and other MCP-compatible tools.
 
 ---
 
@@ -332,7 +399,7 @@ Removes the API key from macOS Keychain and clears the default agent from config
 
 ## Validation Rules
 
-Deploy automatically checks these rules before uploading. Errors block deployment. Warnings do not.
+Deploy and `validate` both run these checks. Errors block deployment. Warnings do not.
 
 ### Required Files
 
@@ -367,8 +434,7 @@ Must contain:
 | `asyncio.sleep()` | `self.worker.session_tasks.sleep()` |
 | `asyncio.create_task()` | `self.worker.session_tasks.create()` |
 | `open()` | `capability_worker` file helpers |
-| `exec()` | Not allowed |
-| `eval()` | Not allowed |
+| `exec()` / `eval()` | Not allowed |
 | `pickle` / `dill` / `shelve` / `marshal` | Not allowed (security) |
 | `assert` | Not allowed |
 | `hashlib.md5()` | Not allowed |
@@ -393,12 +459,23 @@ Must contain:
 
 ## Configuration
 
+### Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `OPENHOME_API_KEY` | API key — takes precedence over stored credentials |
+| `OPENHOME_JWT` | Session token — takes precedence over stored credentials |
+| `OPENHOME_API_BASE` | Override API endpoint (enterprise / staging environments) |
+| `OPENHOME_NO_UPDATE` | Set to `1` to disable the auto-update check |
+
 ### Storage Location
 
 ```
 ~/.openhome/
-  config.json    # Settings, fallback API key, session token
+  config.json    # Settings, fallback credentials
 ```
+
+On macOS, API key and session token are stored in the system Keychain (service: `openhome-cli`). The config file is a fallback for non-macOS platforms or when Keychain is unavailable.
 
 ### Config Fields
 
@@ -406,20 +483,24 @@ Must contain:
 |-------|---------|---------|
 | `api_base_url` | Override API endpoint | `https://app.openhome.com` |
 | `default_personality_id` | Default agent for deploys | (none) |
-| `api_key` | Fallback key storage | (none — prefers Keychain) |
-| `jwt` | Session token for management commands | (none — set via `set-jwt`) |
+| `api_key` | Fallback key storage (prefer Keychain) | (none) |
+| `jwt` | Fallback session token (prefer Keychain) | (none) |
 
-### API Key Storage
+### Auto-update
 
-On macOS, your API key is stored in the system Keychain (service: `openhome-cli`, account: `api-key`). On other platforms, it falls back to `~/.openhome/config.json`.
+The CLI checks npm once per day for a newer version (result cached — no network call on every run).
+
+- **npx**: new version re-executed transparently
+- **Global install**: one-line notice printed, current version continues
+- Set `OPENHOME_NO_UPDATE=1` to disable (useful in CI)
 
 ---
 
 ## What This Tool Does NOT Do
 
-- **No local ability testing** — Abilities run on the OpenHome platform. Deploy and use "Start Live Test" in the web editor to test.
-- **No ability editing** — The CLI does not modify deployed abilities. Edit locally, then re-deploy.
-- **No update/redeploy** — There is no endpoint to overwrite an existing ability version. Deploy creates a new entry; delete the old one via `openhome delete`.
+- **No local ability testing** — Abilities run on the OpenHome platform. Use "Start Live Test" in the web editor.
+- **No ability editing** — Edit locally, then re-deploy.
+- **No update/redeploy** — Deploy creates a new entry; use `openhome delete` to remove the old one first.
 - **No Windows Keychain** — API key stored in plaintext config on non-macOS platforms.
 
 ---
@@ -437,7 +518,7 @@ On macOS, your API key is stored in the system Keychain (service: `openhome-cli`
 | `toggle` | `PUT /api/capabilities/edit-installed-capability/:id/` | JWT | Live |
 | `assign` | `PUT /api/personalities/edit-personality/` | JWT | Live |
 
-Commands marked **JWT** require `openhome set-jwt <token>` first. OpenHome currently uses separate auth for SDK operations (API key) vs. account management (web session JWT). Once OpenHome adds API key support to management endpoints, the `set-jwt` step will no longer be needed.
+Commands marked **JWT** require `openhome set-jwt` first.
 
 ---
 
@@ -445,7 +526,6 @@ Commands marked **JWT** require `openhome set-jwt <token>` first. OpenHome curre
 
 - [ ] `openhome watch` — Auto-deploy on file changes
 - [ ] `openhome update` — Re-deploy/overwrite an existing ability (pending server-side update endpoint)
-- [ ] Background Daemon and Brain Skill templates
 - [ ] Cross-platform secure key storage (Windows Credential Manager, Linux Secret Service)
 - [ ] Management commands without JWT (pending OpenHome API update)
 
