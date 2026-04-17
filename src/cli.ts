@@ -173,6 +173,11 @@ async function interactiveMenu(): Promise<void> {
           hint: "Stream live agent messages",
         },
         {
+          value: "set-jwt",
+          label: "🔑  Refresh Token",
+          hint: "Update your session token (JWT)",
+        },
+        {
           value: "logout",
           label: "🔓  Log Out",
           hint: "Clear credentials and re-authenticate",
@@ -206,6 +211,9 @@ async function interactiveMenu(): Promise<void> {
         break;
       case "logs":
         await logsCommand();
+        break;
+      case "set-jwt":
+        await setJwtCommand();
         break;
       case "logout":
         await logoutCommand();
@@ -454,93 +462,187 @@ checkForUpdates().then(() => {
     if (!process.stdout.isTTY) {
       console.log(`# OpenHome CLI — Agent Reference v${version}
 
-OpenHome deploys Python "abilities" to AI voice agents. This CLI manages everything non-interactively.
+OpenHome deploys Python "abilities" to AI voice agents. This CLI is fully non-interactive
+and designed for use by AI agents (Claude Code, GitHub Actions, etc) as well as humans.
 
-## Auth
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## CRITICAL: JWT REQUIRES A HUMAN — READ THIS FIRST
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Option A — Environment variables (best for CI/agents, no disk writes):
+There are two credentials. Their automation properties are completely different:
+
+  OPENHOME_API_KEY  — Fully automatable. Set it once, never expires, agents handle it.
+  OPENHOME_JWT      — REQUIRES A HUMAN. Browser-only refresh. Agents cannot do this.
+
+JWT tokens are invalidated immediately when the user opens the OpenHome web app
+(the browser gets a new token and the old one dies). This is not a bug.
+
+WHEN JWT IS EXPIRED (exit code 2 / SESSION_EXPIRED):
+  → DO NOT retry. It will not work.
+  → DO NOT attempt to refresh it yourself. You cannot.
+  → STOP and tell the human exactly this:
+
+    "Your OpenHome session token has expired. Please refresh it:
+     Option A (interactive): run \`openhome\` and choose 'Refresh Token'
+     Option B (direct):      run \`openhome set-jwt\` in your terminal
+     Then retry this task."
+
+BEFORE running any JWT-required command, check first:
+  openhome whoami --json
+  → jwt_status: "valid" = proceed
+  → jwt_status: "expiring_soon" = warn the human, proceed
+  → jwt_status: "expired" | "missing" = STOP, ask human to refresh
+
+Commands that need JWT:  list, delete, toggle, assign, status
+Commands that need only API key:  deploy, agents, chat, trigger, logs, validate, whoami
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## Auth Setup
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Option A — Environment variables (stateless, no disk writes, best for CI/agents):
   export OPENHOME_API_KEY=<your_api_key>
   export OPENHOME_JWT=<your_session_token>
-  # Then just run commands — no login needed
 
-Option B — Persistent login (run once, creds saved to ~/.openhome/config.json):
+Option B — Persistent login (run once by a human, creds saved to Keychain):
   openhome login --key <API_KEY> --jwt <SESSION_TOKEN>
-  openhome whoami
+  openhome whoami   # verify
 
-API_KEY  → app.openhome.com/dashboard/settings → API Keys
-JWT      → browser console on app.openhome.com: copy(localStorage.getItem('access_token'))
+Where to get credentials (human must do this in a browser):
+  API_KEY → app.openhome.com/dashboard/settings → API Keys
+  JWT     → open app.openhome.com, then browser console:
+            copy(localStorage.getItem('access_token'))
+  Tip: grab JWT after you are done in the web app — opening it invalidates the old token.
 
-Env vars take precedence over stored credentials. Use OPENHOME_NO_UPDATE=1 to skip update checks.
+Env vars take precedence over stored credentials.
+OPENHOME_NO_UPDATE=1 disables the auto-update check (useful in CI).
+OPENHOME_API_BASE overrides the API endpoint (enterprise/staging).
 
-## Commands (add --json to any for machine-readable output)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## Commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-deploy   Upload an ability zip
-  openhome deploy <path.zip> --name "Name" --description "Desc" --category skill --triggers "word1,word2" [--timeout 120] [--json]
+All commands support --json for machine-readable output.
+All prompts can be bypassed with flags — no TTY required.
+
+── Pre-flight ──────────────────────────────────────────────────────
+
+whoami   Check auth state before doing anything else
+  openhome whoami --json
+  → ok, api_key_status, jwt_status (valid|expiring_soon|expired|missing),
+    default_agent, tracked_abilities
+
+validate  Check an ability for errors before deploying (no upload)
+  openhome validate [path]
+  → prints errors (block deploy) and warnings (do not block)
+
+── Ability lifecycle ───────────────────────────────────────────────
+
+deploy   Upload an ability zip  [API key only]
+  openhome deploy <path.zip> --name "Name" --description "Desc" \\
+    --category skill --triggers "word1,word2" [--timeout 120] [--json]
   categories: skill | brain_skill | background_daemon | local
+  NOTE: no overwrite endpoint exists yet — delete old version first if renaming
 
-list     Show uploaded abilities
+list     Show all uploaded abilities  [JWT required]
   openhome list [--json]
+  → returns id (numeric), name, status, version, updated_at
 
-delete   Delete by ID or name — --yes skips confirmation
+status   Detailed info for one ability  [JWT required]
+  openhome status <id|name> [--json]
+
+delete   Delete by ID or name  [JWT required]
   openhome delete <id|name> --yes [--json]
+  --yes skips confirmation prompt (required for non-interactive use)
 
-toggle   Enable or disable
+toggle   Enable or disable  [JWT required]
   openhome toggle <id|name> --enable [--json]
   openhome toggle <id|name> --disable [--json]
 
-assign   Link abilities to an agent (IDs or names accepted)
+── Agent management ────────────────────────────────────────────────
+
+agents   List agents and set default  [API key only]
+  openhome agents [--json]
+  → returns id (UUID), name. Use name or id interchangeably in --agent flags.
+
+assign   Link abilities to an agent  [JWT required]
   openhome assign --agent <agent_id|name> --capabilities <id1,id2,...> [--json]
 
-agents   List agents
-  openhome agents [--json]
+── Testing ─────────────────────────────────────────────────────────
 
-status   Detailed status for one ability
-  openhome status <id|name> [--json]
+chat     WebSocket chat with an agent  [API key only]
+  openhome chat [agent_id]
+  → connects via WebSocket, send text to trigger abilities and see responses
+  → type /quit or press Ctrl+C to disconnect
+  → audio responses are not playable in terminal; text responses display normally
+  → use this to verify an ability responds correctly after deploying
 
-whoami   Auth status, JWT expiry, default agent
-  openhome whoami [--json]
-
-trigger  Fire a trigger phrase
+trigger  Fire a trigger phrase remotely  [API key only]
   openhome trigger "phrase" --agent <agent_id>
 
-logs     Stream live agent messages
-  openhome logs --agent <agent_id>
+logs     Stream live agent messages  [API key only]
+  openhome logs [--agent <agent_id>]
 
-chat     WebSocket chat with an agent
-  openhome chat [agent_id]
+── Auth management (human-only operations) ─────────────────────────
 
-set-jwt  Save or update session token (persisted to Keychain on macOS)
+set-jwt  Update session token — REQUIRES HUMAN (browser action)  [no auth needed]
   openhome set-jwt <token>
+  Agents: do not call this — you cannot supply the token. Tell the human to run it.
 
-mcp      Start OpenHome MCP voice server
+login    First-time auth setup — REQUIRES HUMAN (API key + JWT from browser)
+  openhome login --key <API_KEY> --jwt <JWT_TOKEN>
+
+logout   Clear all stored credentials
+  openhome logout
+
+── Integration ─────────────────────────────────────────────────────
+
+mcp      Start OpenHome MCP voice server for Claude Code integration
   openhome mcp
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ## Typical agent workflow
-  # Auth (once — creds stored in Keychain, survive reboots)
-  openhome login --key $OPENHOME_API_KEY --jwt $OPENHOME_JWT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  # Or use env vars for stateless CI (no disk writes, no login step)
-  export OPENHOME_API_KEY=... OPENHOME_JWT=...
+  # 1. Check auth state before starting
+  openhome whoami --json
+  # If jwt_status is expired/missing → STOP, ask human to run: openhome set-jwt
 
-  # Deploy, list, assign, clean up
-  openhome deploy ./skill.zip --name "my-skill" --description "Does X" --category skill --triggers "activate" --json
-  openhome list --json
-  openhome assign --agent "My Agent" --capabilities <id_from_list> --json
-  openhome delete <id> --yes --json
+  # 2. Validate before deploying
+  openhome validate ./my-ability
 
+  # 3. Deploy
+  openhome deploy ./my-ability.zip --name "my-skill" --description "Does X" \\
+    --category skill --triggers "activate" --json
+
+  # 4. Assign to agent (use name from step 1 agents output)
+  openhome assign --agent "My Agent" --capabilities my-skill --json
+
+  # 5. Test via chat
+  openhome chat <agent_id>
+
+  # 6. Clean up old version
+  openhome delete <old_id> --yes --json
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ## Exit codes
-  0 = success
-  1 = error
-  2 = auth error (expired JWT, invalid key — needs human intervention)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+  0 = success
+  1 = error (bad input, network failure, etc — check stderr)
+  2 = auth error (expired JWT, invalid API key) — STOP, needs human intervention
+
+On exit code 2, the JSON error response includes:
+  { "ok": false, "error": { "code": "SESSION_EXPIRED" | "AUTH_ERROR", "message": "..." } }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ## Notes
-- All commands fully non-interactive when flags supplied — no TTY required
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 - Ability IDs are numeric (e.g. 3501); names also accepted everywhere
-- Agent IDs are UUIDs; names also work in --agent
+- Agent IDs are UUIDs; names also work in --agent flags
 - JWT stored in macOS Keychain — survives reboots, no re-login each session
-- whoami --json shows jwt_status: valid | expiring_soon | expired | missing
-- OPENHOME_API_BASE overrides the API endpoint (for enterprise staging environments)
-- OPENHOME_NO_UPDATE=1 disables auto-update check`);
+- agents edit command opens \\$EDITOR — interactive only, requires a human`);
       process.exit(0);
     }
     interactiveMenu().catch((err: unknown) => {
