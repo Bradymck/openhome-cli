@@ -4,16 +4,18 @@ import { jsonOut, p } from "../ui/format.js";
 import chalk from "chalk";
 
 const REAUTH_HINT = [
-  "Your session token has expired. Tokens last ~24 hours.",
+  "Your session token was revoked — this happens when you open the OpenHome",
+  "web app (the browser gets a fresh token and the old CLI token dies immediately).",
   "",
-  "To get a fresh token (30 seconds):",
-  "  1. Open: https://app.openhome.com",
-  "  2. Open browser console (Cmd+Option+J on Mac, F12 on Windows)",
+  "Get a fresh token (30 seconds):",
+  "  1. Go to https://app.openhome.com  (if already open, just switch to it)",
+  "  2. Open browser console: Cmd+Option+J  (Mac)  or  F12 (Windows)",
   "  3. Run: copy(localStorage.getItem('access_token'))",
   "  4. Run: openhome set-jwt <paste_token_here>",
   "",
+  "Tip: grab the token AFTER you are done in the web app so it stays valid.",
   "For CI/agents, set the env var instead (no disk write):",
-  "  export OPENHOME_JWT=<new_token>",
+  "  export OPENHOME_JWT=<token>",
 ].join("\n");
 
 export async function handleIfSessionExpired(
