@@ -414,8 +414,9 @@ program
 program
   .command("validate [path]")
   .description("Validate an ability directory before deploying")
-  .action(async (path?: string) => {
-    await validateCommand(path);
+  .option("--json", "Output machine-readable JSON")
+  .action(async (path: string | undefined, opts: { json?: boolean }) => {
+    await validateCommand(path, opts);
   });
 
 program
@@ -437,7 +438,7 @@ program
 program
   .command("set-jwt [token]")
   .description(
-    "Save a session token to enable deploy (list, delete, toggle, assign now use API key)",
+    "Save a session JWT token (required for list, delete, toggle, assign, status)",
   )
   .action(async (token?: string) => {
     await setJwtCommand(token);
@@ -533,8 +534,9 @@ whoami   Check auth state before doing anything else
     default_agent, tracked_abilities
 
 validate  Check an ability for errors before deploying (no upload)
-  openhome validate [path]
-  → prints errors (block deploy) and warnings (do not block)
+  openhome validate [path] [--json]
+  → ok (bool), errors (block deploy), warnings (do not block)
+  → exit 1 if errors, exit 0 if clean or warnings-only
 
 ── Ability lifecycle ───────────────────────────────────────────────
 
@@ -542,11 +544,16 @@ deploy   Upload an ability zip  [API key only]
   openhome deploy <path.zip> --name "Name" --description "Desc" \\
     --category skill --triggers "word1,word2" [--timeout 120] [--json]
   categories: skill | brain_skill | background_daemon | local
+  NOTE: deploy requires a pre-made .zip file — it does NOT auto-zip a directory.
+  To create the zip (must be from the PARENT directory, not from inside the folder):
+    cd /path/to/parent && zip -r my-ability.zip my-ability/
+    openhome deploy ./my-ability.zip --name "my-ability" ...
   NOTE: no overwrite endpoint exists yet — delete old version first if renaming
 
 list     Show all uploaded abilities  [JWT required]
   openhome list [--json]
-  → returns id (numeric), name, status, version, updated_at
+  → returns id (numeric string e.g. "3501"), name, display_name, status,
+    version, category, trigger_words (array), updated_at
 
 status   Detailed info for one ability  [JWT required]
   openhome status <id|name> [--json]
@@ -558,12 +565,14 @@ delete   Delete by ID or name  [JWT required]
 toggle   Enable or disable  [JWT required]
   openhome toggle <id|name> --enable [--json]
   openhome toggle <id|name> --disable [--json]
+  NOTE: toggle endpoint is not yet implemented server-side — returns NOT_IMPLEMENTED.
+  Use the OpenHome web dashboard to enable/disable abilities for now.
 
 ── Agent management ────────────────────────────────────────────────
 
 agents   List agents and set default  [API key only]
   openhome agents [--json]
-  → returns id (UUID), name. Use name or id interchangeably in --agent flags.
+  → returns id (numeric string e.g. "245524"), name. Use name or id interchangeably.
 
 assign   Link abilities to an agent  [JWT required]
   openhome assign --agent <agent_id|name> --capabilities <id1,id2,...> [--json]
@@ -608,20 +617,27 @@ mcp      Start OpenHome MCP voice server for Claude Code integration
   openhome whoami --json
   # If jwt_status is expired/missing → STOP, ask human to run: openhome set-jwt
 
-  # 2. Validate before deploying
+  # 2. Get your agent ID/name
+  openhome agents --json
+  # → pick an id or name from the returned list for use in assign/deploy
+
+  # 3. Validate before deploying
   openhome validate ./my-ability
 
-  # 3. Deploy
+  # 4. Zip the ability (from parent directory — required)
+  cd /path/to/parent && zip -r my-ability.zip my-ability/
+
+  # 5. Deploy
   openhome deploy ./my-ability.zip --name "my-skill" --description "Does X" \\
     --category skill --triggers "activate" --json
 
-  # 4. Assign to agent (use name from step 1 agents output)
+  # 6. Assign to agent (use id or name from step 2)
   openhome assign --agent "My Agent" --capabilities my-skill --json
 
-  # 5. Test via chat
+  # 7. Test via chat
   openhome chat <agent_id>
 
-  # 6. Clean up old version
+  # 8. Clean up old version if needed
   openhome delete <old_id> --yes --json
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -1,16 +1,30 @@
 import { resolve } from "node:path";
 import { validateAbility } from "../validation/validator.js";
-import { success, error, warn, p } from "../ui/format.js";
+import { success, error, warn, p, jsonOut } from "../ui/format.js";
 import chalk from "chalk";
 
-export async function validateCommand(pathArg: string = "."): Promise<void> {
+export async function validateCommand(
+  pathArg: string = ".",
+  opts: { json?: boolean } = {},
+): Promise<void> {
   const targetDir = resolve(pathArg);
+  const result = validateAbility(targetDir);
+
+  if (opts.json) {
+    jsonOut({
+      ok: result.passed,
+      path: targetDir,
+      errors: result.errors,
+      warnings: result.warnings,
+    });
+    if (!result.passed) process.exit(1);
+    return;
+  }
+
   p.intro(`🔎 Validate ability`);
 
   const s = p.spinner();
   s.start("Running checks...");
-
-  const result = validateAbility(targetDir);
 
   if (result.errors.length === 0 && result.warnings.length === 0) {
     s.stop("All checks passed.");
