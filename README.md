@@ -20,7 +20,7 @@ export OPENHOME_JWT=<your_session_token>
 # Deploy, assign, and chat-test an ability — all scriptable
 openhome deploy ./my-ability.zip --name "weather-bot" --category skill --triggers "weather" --json
 openhome assign --agent "My Agent" --capabilities weather-bot --json
-openhome chat pers_abc123
+openhome chat <agent_id>
 ```
 
 When called with no TTY (pipes, CI, agents), `openhome` with no arguments prints a machine-readable command reference and exits — so agents always get structured output.
@@ -97,7 +97,14 @@ export OPENHOME_JWT=<your_session_token>
 **Typical agent/CI workflow:**
 
 ```bash
-openhome deploy ./skill.zip --name "my-skill" --description "Does X" \
+# 0. Check auth state first — if jwt_status is expired/missing, stop and ask the human to run: openhome set-jwt
+openhome whoami --json
+
+# 1. Zip the ability (from parent directory)
+zip -r my-skill.zip my-skill/
+
+# 2. Deploy, list, assign, clean up
+openhome deploy ./my-skill.zip --name "my-skill" --description "Does X" \
   --category skill --triggers "activate" --json
 openhome list --json
 openhome assign --agent "My Agent" --capabilities <id_from_list> --json

@@ -23,8 +23,20 @@
     "voice",
     "ai",
     "cli",
-    "abilities"
+    "abilities",
+    "voice-ai",
+    "developer-tools",
+    "agents",
+    "mcp"
   ],
+  "homepage": "https://docs.openhome.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Bradymck/openhome-cli"
+  },
+  "bugs": {
+    "url": "https://github.com/Bradymck/openhome-cli/issues"
+  },
   "author": "Brady McKenna <brady@openhome.com>",
   "license": "MIT",
   "dependencies": {
