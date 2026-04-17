@@ -173,6 +173,11 @@ async function interactiveMenu(): Promise<void> {
           hint: "Stream live agent messages",
         },
         {
+          value: "set-jwt",
+          label: "🔑  Refresh Token",
+          hint: "Update your session token (JWT)",
+        },
+        {
           value: "logout",
           label: "🔓  Log Out",
           hint: "Clear credentials and re-authenticate",
@@ -206,6 +211,9 @@ async function interactiveMenu(): Promise<void> {
         break;
       case "logs":
         await logsCommand();
+        break;
+      case "set-jwt":
+        await setJwtCommand();
         break;
       case "logout":
         await logoutCommand();
