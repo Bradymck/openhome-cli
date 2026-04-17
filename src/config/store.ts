@@ -174,7 +174,10 @@ export function saveJwt(jwt: string): void {
       saveConfig(config);
     }
   } else {
-    // Keychain unavailable (Linux/Windows) — store in config file
+    // Keychain write failed (permissions, or Linux/Windows without secret-tool).
+    // Explicitly delete any stale keychain entry so it can't shadow the config file
+    // on the next read (getJwt checks keychain before config file).
+    keychainDelete(SERVICE, "jwt");
     const config = getConfig();
     config.jwt = jwt;
     saveConfig(config);

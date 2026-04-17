@@ -67,7 +67,7 @@ export async function whoamiCommand(
     }
   } else {
     info(
-      `Session token: ${chalk.red("missing")}  — run ${chalk.bold("openhome login")}`,
+      `Session token: ${chalk.red("missing")}  — run ${chalk.bold("openhome set-jwt <token>")}`,
     );
   }
 
